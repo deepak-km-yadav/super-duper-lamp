@@ -1,17 +1,16 @@
-import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import bcrypt from "bcryptjs";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const userId = req.nextUrl.searchParams.get("userId");
+    if (!userId) {
+      return NextResponse.json({ error: "userId parameter required" }, { status: 400 });
     }
 
     const user = await prisma.user.findUnique({
-      where: { id: session.user.id },
+      where: { id: userId },
       select: {
         id: true,
         name: true,
@@ -37,13 +36,9 @@ export async function GET() {
 
 export async function PATCH(req: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const body = await req.json();
     const {
+      userId,
       name,
       themePreference,
       defaultModel,
@@ -52,6 +47,10 @@ export async function PATCH(req: Request) {
       currentPassword,
       newPassword,
     } = body;
+
+    if (!userId) {
+      return NextResponse.json({ error: "userId required" }, { status: 400 });
+    }
 
     const updateData: Record<string, unknown> = {};
 
@@ -70,7 +69,7 @@ export async function PATCH(req: Request) {
       }
 
       const user = await prisma.user.findUnique({
-        where: { id: session.user.id },
+        where: { id: userId },
       });
 
       if (!user?.passwordHash) {
@@ -92,7 +91,7 @@ export async function PATCH(req: Request) {
     }
 
     const updated = await prisma.user.update({
-      where: { id: session.user.id },
+      where: { id: userId },
       data: updateData,
       select: {
         id: true,

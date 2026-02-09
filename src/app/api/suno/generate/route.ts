@@ -1,17 +1,12 @@
 import { NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { createGeneration } from "@/lib/suno";
 
 export async function POST(req: Request) {
   try {
-    const session = await auth();
-    if (!session?.user?.id) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const body = await req.json();
     const {
+      userId,
       songType,
       vocalGender,
       mode,
@@ -70,7 +65,7 @@ export async function POST(req: Request) {
     // Create generation record
     const generation = await prisma.generation.create({
       data: {
-        userId: session.user.id,
+        userId: userId || null,
         songType: songType || "vocal",
         vocalGender: songType === "vocal" ? vocalGender : null,
         mode: mode || "simple",

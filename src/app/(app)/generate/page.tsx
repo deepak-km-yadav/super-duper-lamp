@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { useSession } from "next-auth/react";
-import { redirect } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import GenerateForm from "@/components/generate/GenerateForm";
 import GenerationProgress from "@/components/generate/GenerationProgress";
@@ -12,17 +10,10 @@ import type { GenerationFormData, Generation } from "@/types";
 import toast from "react-hot-toast";
 
 export default function GeneratePage() {
-  const { data: session, status } = useSession();
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentGeneration, setCurrentGeneration] = useState<Generation | null>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  useEffect(() => {
-    if (status === "unauthenticated") {
-      redirect("/login");
-    }
-  }, [status]);
 
   const pollStatus = useCallback((generationId: string) => {
     if (pollingRef.current) {
@@ -90,7 +81,7 @@ export default function GeneratePage() {
         id: data.id,
         taskId: data.taskId,
         status: data.status || "processing",
-        userId: session?.user?.id || "",
+        userId: "",
         songType: formData.songType,
         vocalGender: formData.vocalGender,
         mode: formData.mode,
@@ -125,25 +116,13 @@ export default function GeneratePage() {
       await fetch("/api/user/favorites", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ trackId }),
+        body: JSON.stringify({ trackId, userId: "" }),
       });
       toast.success("Added to favorites!");
     } catch {
       toast.error("Failed to favorite");
     }
   };
-
-  if (status === "loading") {
-    return (
-      <div className="max-w-4xl mx-auto px-4 py-12">
-        <div className="space-y-6">
-          {[...Array(3)].map((_, i) => (
-            <div key={i} className="skeleton h-32 w-full" />
-          ))}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12">

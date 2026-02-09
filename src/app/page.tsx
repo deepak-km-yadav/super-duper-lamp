@@ -1,19 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useSession } from "next-auth/react";
-import { redirect } from "next/navigation";
 import { Heart, Music, Sparkles, Play, ArrowRight, Mic, Headphones } from "lucide-react";
 import { motion } from "framer-motion";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 
 export default function LandingPage() {
-  const { data: session, status } = useSession();
-
-  if (status === "authenticated" && session) {
-    redirect("/generate");
-  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -88,7 +81,7 @@ export default function LandingPage() {
               className="flex flex-col sm:flex-row items-center justify-center gap-4"
             >
               <Link
-                href="/register"
+                href="/generate"
                 className="btn-primary text-base flex items-center gap-2 !px-8 !py-3.5"
               >
                 <Heart className="w-5 h-5" />
@@ -96,11 +89,11 @@ export default function LandingPage() {
                 <ArrowRight className="w-4 h-4" />
               </Link>
               <Link
-                href="/login"
+                href="/history"
                 className="btn-secondary flex items-center gap-2 !px-8 !py-3"
               >
                 <Play className="w-4 h-4" />
-                Sign In
+                View History
               </Link>
             </motion.div>
           </div>
@@ -220,7 +213,7 @@ export default function LandingPage() {
               Create a one-of-a-kind love song in minutes. No musical experience needed.
             </p>
             <Link
-              href="/register"
+              href="/generate"
               className="btn-primary inline-flex items-center gap-2 text-base !px-10 !py-3.5"
             >
               <Heart className="w-5 h-5" />

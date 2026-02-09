@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useSession } from "next-auth/react";
-import { redirect, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import {
   History,
   Search,
@@ -19,7 +18,6 @@ import type { Generation } from "@/types";
 import toast from "react-hot-toast";
 
 export default function HistoryPage() {
-  const { data: session, status: authStatus } = useSession();
   const router = useRouter();
   const [generations, setGenerations] = useState<Generation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,14 +29,7 @@ export default function HistoryPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (authStatus === "unauthenticated") {
-      redirect("/login");
-    }
-  }, [authStatus]);
-
   const fetchHistory = useCallback(async () => {
-    if (!session) return;
     setLoading(true);
     try {
       const params = new URLSearchParams({
@@ -59,7 +50,7 @@ export default function HistoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [session, page, sort, statusFilter, search]);
+  }, [page, sort, statusFilter, search]);
 
   useEffect(() => {
     fetchHistory();
@@ -101,18 +92,6 @@ export default function HistoryPage() {
       </span>
     );
   };
-
-  if (authStatus === "loading") {
-    return (
-      <div className="max-w-5xl mx-auto px-4 py-12">
-        <div className="space-y-4">
-          {[...Array(5)].map((_, i) => (
-            <div key={i} className="skeleton h-24 w-full" />
-          ))}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12">

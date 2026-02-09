@@ -1,6 +1,10 @@
 const SUNO_API_BASE = process.env.SUNO_API_BASE_URL || "https://api.sunoapi.org";
 const SUNO_API_KEY = process.env.SUNO_API_KEY || "";
 
+// Valid Suno API model versions
+const VALID_MODELS = ["V5", "V4_5ALL", "V4_5PLUS", "V4_5Plus", "V4_5", "V4"] as const;
+type SunoModel = typeof VALID_MODELS[number];
+
 interface SunoGenerateParams {
   prompt: string;
   style?: string;
@@ -11,6 +15,7 @@ interface SunoGenerateParams {
   instrumental?: boolean;
   callBackUrl?: string;
   negativeTags?: string;
+  vocalGender?: string;
   styleWeight?: number;
   weirdnessConstraint?: number;
   audioWeight?: number;
@@ -55,20 +60,38 @@ export async function createGeneration(params: SunoGenerateParams): Promise<Suno
       };
     }
 
-    const requestBody = {
+    // Validate and set model
+    const model = params.model || "V4_5ALL";
+    if (!VALID_MODELS.includes(model as SunoModel)) {
+      console.error("[Suno API] Invalid model:", model);
+      return {
+        code: 400,
+        msg: `Invalid model: ${model}. Valid models are: ${VALID_MODELS.join(", ")}`,
+        data: undefined,
+      };
+    }
+
+    // Build request body with only defined values to avoid sending undefined
+    const requestBody: Record<string, string | number | boolean> = {
       prompt: params.prompt,
-      style: params.style || undefined,
-      title: params.title || undefined,
+      model: model, // Validated model
       customMode: params.customMode || false,
       instrumental: params.instrumental || false,
-      model: params.model || "V4",
-      callBackUrl: params.callBackUrl || `${process.env.NEXT_PUBLIC_APP_URL}/api/suno/callback`,
-      negativeTags: params.negativeTags || undefined,
-      styleWeight: params.styleWeight,
-      weirdnessConstraint: params.weirdnessConstraint,
-      audioWeight: params.audioWeight,
-      personaId: params.personaId || undefined,
     };
+
+    // Add optional parameters only if they have values
+    if (params.style) requestBody.style = params.style;
+    if (params.title) requestBody.title = params.title;
+    if (params.callBackUrl) requestBody.callBackUrl = params.callBackUrl;
+    else if (process.env.NEXT_PUBLIC_APP_URL) {
+      requestBody.callBackUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/suno/callback`;
+    }
+    if (params.negativeTags) requestBody.negativeTags = params.negativeTags;
+    if (params.personaId) requestBody.personaId = params.personaId;
+    if (params.vocalGender) requestBody.vocalGender = params.vocalGender;
+    if (typeof params.styleWeight === 'number') requestBody.styleWeight = params.styleWeight;
+    if (typeof params.weirdnessConstraint === 'number') requestBody.weirdnessConstraint = params.weirdnessConstraint;
+    if (typeof params.audioWeight === 'number') requestBody.audioWeight = params.audioWeight;
 
     console.log("[Suno API] Request:", {
       url: `${SUNO_API_BASE}/api/v1/generate`,

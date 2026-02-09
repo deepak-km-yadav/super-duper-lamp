@@ -4,6 +4,15 @@ import { createGeneration } from "@/lib/suno";
 
 export async function POST(req: Request) {
   try {
+    // Check if Suno API is configured
+    const sunoApiKey = process.env.SUNO_API_KEY;
+    const sunoApiBase = process.env.SUNO_API_BASE_URL || "https://apibox.erweima.ai";
+
+    console.log("[Route] Suno API Configuration:", {
+      apiKeyConfigured: !!sunoApiKey,
+      apiBase: sunoApiBase,
+    });
+
     const body = await req.json();
     const {
       userId,
@@ -121,6 +130,7 @@ export async function POST(req: Request) {
           status: "processing",
         });
       } else {
+        console.error("[Route] Suno API error:", sunoResponse);
         await prisma.generation.update({
           where: { id: generation.id },
           data: {
@@ -137,7 +147,8 @@ export async function POST(req: Request) {
           { status: 502 }
         );
       }
-    } catch {
+    } catch (error) {
+      console.error("[Route] Suno API exception:", error);
       // If Suno API is unreachable, simulate for demo purposes
       const demoTaskId = `demo-${generation.id}`;
       await prisma.generation.update({
@@ -187,9 +198,13 @@ export async function POST(req: Request) {
         demo: true,
       });
     }
-  } catch {
+  } catch (error) {
+    console.error("[Route] Unexpected error:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      {
+        error: "Internal server error",
+        details: error instanceof Error ? error.message : String(error),
+      },
       { status: 500 }
     );
   }

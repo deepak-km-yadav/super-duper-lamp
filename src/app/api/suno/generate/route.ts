@@ -6,7 +6,7 @@ export async function POST(req: Request) {
   try {
     // Check if Suno API is configured
     const sunoApiKey = process.env.SUNO_API_KEY;
-    const sunoApiBase = process.env.SUNO_API_BASE_URL || "https://apibox.erweima.ai";
+    const sunoApiBase = process.env.SUNO_API_BASE_URL || "https://api.sunoapi.org";
 
     console.log("[Route] Suno API Configuration:", {
       apiKeyConfigured: !!sunoApiKey,

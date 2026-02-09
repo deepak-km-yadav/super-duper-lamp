@@ -1,4 +1,4 @@
-const SUNO_API_BASE = process.env.SUNO_API_BASE_URL || "https://apibox.erweima.ai";
+const SUNO_API_BASE = process.env.SUNO_API_BASE_URL || "https://api.sunoapi.org";
 const SUNO_API_KEY = process.env.SUNO_API_KEY || "";
 
 interface SunoGenerateParams {
@@ -47,7 +47,12 @@ interface SunoStatusResponse {
 export async function createGeneration(params: SunoGenerateParams): Promise<SunoResponse> {
   try {
     if (!SUNO_API_KEY) {
-      throw new Error("SUNO_API_KEY is not configured");
+      console.error("[Suno API] SUNO_API_KEY is not configured");
+      return {
+        code: 500,
+        msg: "SUNO_API_KEY environment variable is not configured. Please add it to your Vercel environment variables.",
+        data: undefined,
+      };
     }
 
     const requestBody = {
@@ -67,6 +72,9 @@ export async function createGeneration(params: SunoGenerateParams): Promise<Suno
 
     console.log("[Suno API] Request:", {
       url: `${SUNO_API_BASE}/api/v1/generate`,
+      baseUrl: SUNO_API_BASE,
+      hasApiKey: !!SUNO_API_KEY,
+      apiKeyPrefix: SUNO_API_KEY ? SUNO_API_KEY.substring(0, 10) + "..." : "none",
       body: requestBody,
     });
 
@@ -83,7 +91,11 @@ export async function createGeneration(params: SunoGenerateParams): Promise<Suno
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("[Suno API] Error response:", errorText);
+      console.error("[Suno API] Error response:", {
+        status: response.status,
+        statusText: response.statusText,
+        body: errorText,
+      });
 
       let errorData;
       try {
@@ -94,7 +106,7 @@ export async function createGeneration(params: SunoGenerateParams): Promise<Suno
 
       return {
         code: response.status,
-        msg: errorData.msg || errorData.message || `API request failed with status ${response.status}`,
+        msg: errorData.msg || errorData.message || `API request failed with status ${response.status}: ${response.statusText}`,
         data: undefined,
       };
     }
@@ -104,30 +116,46 @@ export async function createGeneration(params: SunoGenerateParams): Promise<Suno
     return data;
   } catch (error) {
     console.error("[Suno API] Exception:", error);
-    throw error;
+    return {
+      code: 500,
+      msg: error instanceof Error ? error.message : "Unknown error occurred",
+      data: undefined,
+    };
   }
 }
 
 export async function getGenerationStatus(taskId: string): Promise<SunoStatusResponse> {
   try {
     if (!SUNO_API_KEY) {
-      throw new Error("SUNO_API_KEY is not configured");
+      console.error("[Suno API] SUNO_API_KEY is not configured");
+      return {
+        code: 500,
+        msg: "SUNO_API_KEY environment variable is not configured",
+        data: undefined,
+      };
     }
 
-    const response = await fetch(
-      `${SUNO_API_BASE}/api/v1/generate/status?taskId=${taskId}`,
-      {
-        headers: {
-          Authorization: `Bearer ${SUNO_API_KEY}`,
-        },
-      }
-    );
+    const url = `${SUNO_API_BASE}/api/v1/generate/status?taskId=${taskId}`;
+    console.log("[Suno API] Status check URL:", url);
 
-    console.log("[Suno API] Status check response:", response.status);
+    const response = await fetch(url, {
+      headers: {
+        Authorization: `Bearer ${SUNO_API_KEY}`,
+      },
+    });
+
+    console.log("[Suno API] Status check response:", {
+      status: response.status,
+      statusText: response.statusText,
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("[Suno API] Status check error:", errorText);
+      console.error("[Suno API] Status check error:", {
+        status: response.status,
+        statusText: response.statusText,
+        body: errorText,
+      });
 
       let errorData;
       try {
@@ -138,7 +166,7 @@ export async function getGenerationStatus(taskId: string): Promise<SunoStatusRes
 
       return {
         code: response.status,
-        msg: errorData.msg || errorData.message || `Status check failed with status ${response.status}`,
+        msg: errorData.msg || errorData.message || `Status check failed with status ${response.status}: ${response.statusText}`,
         data: undefined,
       };
     }
@@ -148,6 +176,10 @@ export async function getGenerationStatus(taskId: string): Promise<SunoStatusRes
     return data;
   } catch (error) {
     console.error("[Suno API] Status check exception:", error);
-    throw error;
+    return {
+      code: 500,
+      msg: error instanceof Error ? error.message : "Unknown error occurred",
+      data: undefined,
+    };
   }
 }

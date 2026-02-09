@@ -1,8 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useSession } from "next-auth/react";
-import { redirect } from "next/navigation";
 import {
   User,
   Mail,
@@ -29,10 +27,10 @@ interface UserProfile {
 }
 
 export default function ProfilePage() {
-  const { status } = useSession();
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [userId, setUserId] = useState("");
 
   const [name, setName] = useState("");
   const [themePreference, setThemePreference] = useState("dark");
@@ -44,15 +42,9 @@ export default function ProfilePage() {
   const [showPasswordSection, setShowPasswordSection] = useState(false);
 
   useEffect(() => {
-    if (status === "unauthenticated") {
-      redirect("/login");
-    }
-  }, [status]);
-
-  useEffect(() => {
     const fetchProfile = async () => {
       try {
-        const res = await fetch("/api/user/profile");
+        const res = await fetch(`/api/user/profile?userId=${userId}`);
         if (res.ok) {
           const data = await res.json();
           setProfile(data);
@@ -69,10 +61,10 @@ export default function ProfilePage() {
       }
     };
 
-    if (status === "authenticated") {
+    if (userId) {
       fetchProfile();
     }
-  }, [status]);
+  }, [userId]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,6 +72,7 @@ export default function ProfilePage() {
 
     try {
       const body: Record<string, string> = {
+        userId,
         name,
         themePreference,
         defaultModel,
@@ -116,7 +109,7 @@ export default function ProfilePage() {
     }
   };
 
-  if (loading || status === "loading") {
+  if (loading) {
     return (
       <div className="max-w-3xl mx-auto px-4 py-12">
         <div className="space-y-6">

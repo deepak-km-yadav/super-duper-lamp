@@ -66,7 +66,8 @@ export async function GET(req: NextRequest) {
             },
           });
         }
-      } catch {
+      } catch (error) {
+        console.error("[Status Route] Error polling Suno API:", error);
         // Suno API unreachable, return current state
       }
     }
@@ -77,9 +78,13 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json(updated);
-  } catch {
+  } catch (error) {
+    console.error("[Status Route] Unexpected error:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      {
+        error: "Internal server error",
+        details: error instanceof Error ? error.message : String(error),
+      },
       { status: 500 }
     );
   }

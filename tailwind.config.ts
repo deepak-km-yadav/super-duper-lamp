@@ -11,7 +11,12 @@ export default {
         sans: ['Inter', 'SF Pro', 'system-ui', 'sans-serif'],
       },
       colors: {
-        border: "hsl(var(--border))",
+        // Chatterbox semantic tokens (scoped via #chatterbox-root CSS vars)
+        bg: "hsl(var(--bg) / <alpha-value>)",
+        surface: "hsl(var(--surface) / <alpha-value>)",
+        fg: "hsl(var(--fg))",
+        "accent-fg": "hsl(var(--accent-fg))",
+        border: "hsl(var(--border) / <alpha-value>)",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
         background: "hsl(var(--background))",
@@ -51,11 +56,11 @@ export default {
           foreground: "hsl(var(--destructive-foreground))",
         },
         muted: {
-          DEFAULT: "hsl(var(--muted))",
+          DEFAULT: "hsl(var(--muted) / <alpha-value>)",
           foreground: "hsl(var(--muted-foreground))",
         },
         accent: {
-          DEFAULT: "hsl(var(--accent))",
+          DEFAULT: "hsl(var(--accent) / <alpha-value>)",
           foreground: "hsl(var(--accent-foreground))",
         },
         popover: {
@@ -88,7 +93,10 @@ export default {
       animation: {
         'fade-in': 'fadeIn 0.3s ease-in-out',
         'slide-in': 'slideIn 0.3s ease-in-out',
+        'slide-up': 'slideUp 0.35s cubic-bezier(0.22, 1, 0.36, 1)',
+        'slide-down': 'slideDown 0.35s cubic-bezier(0.22, 1, 0.36, 1)',
         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'pulse-dot': 'pulseDot 1.4s ease-in-out infinite',
         'bounce-subtle': 'bounceSubtle 2s infinite',
         'gradient': 'gradient 8s linear infinite',
       },
@@ -100,6 +108,18 @@ export default {
         slideIn: {
           '0%': { transform: 'translateY(10px)', opacity: '0' },
           '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
+        slideUp: {
+          '0%': { opacity: '0', transform: 'translateY(12px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        slideDown: {
+          '0%': { opacity: '0', transform: 'translateY(-12px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        pulseDot: {
+          '0%, 80%, 100%': { opacity: '0.3' },
+          '40%': { opacity: '1' },
         },
         bounceSubtle: {
           '0%, 100%': { transform: 'translateY(-2%)' },

@@ -478,12 +478,12 @@
     to { opacity: 1; transform: scale(1); }
   }
 
-  /* Slide up animation */
-  .animate-slide-up {
-    animation: slideUp 0.5s ease-out forwards;
+  /* Slide up animation (legacy full-height version for existing UI) */
+  .animate-slide-up-full {
+    animation: slideUpFull 0.5s ease-out forwards;
   }
 
-  @keyframes slideUp {
+  @keyframes slideUpFull {
     from { opacity: 0; transform: translateY(100%); }
     to { opacity: 1; transform: translateY(0); }
   }
@@ -562,4 +562,117 @@
     background: hsl(var(--primary));
     border-radius: 2px 2px 0 0;
   }
+}
+
+/* ─── Chatterbox / BotForge scoped styles ──────────────────────────────────── */
+
+#chatterbox-root {
+  /* Dark theme color tokens (HSL triplets for hsl(var(--X) / alpha) format) */
+  --bg: 220 28% 8%;
+  --surface: 220 22% 12%;
+  --border: 220 16% 20%;
+  --muted: 217 14% 55%;
+  --fg: 220 14% 90%;
+  --accent: 199 89% 48%;    /* sky-500 #0ea5e9 */
+  --accent-fg: 0 0% 100%;
+
+  color: hsl(var(--fg));
+  background: hsl(var(--bg));
+  min-height: 100%;
+}
+
+/* Ambient orb background */
+#chatterbox-root .bg-orbs {
+  position: relative;
+  background:
+    radial-gradient(130% 70% at 20% 25%, hsl(199 89% 48% / 0.12), transparent 56%),
+    radial-gradient(110% 65% at 80% 35%, hsl(199 89% 48% / 0.08), transparent 58%),
+    hsl(var(--bg));
+}
+
+/* Card lift on hover */
+#chatterbox-root .card-lift {
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+#chatterbox-root .card-lift:hover {
+  box-shadow: 0 8px 24px hsl(220 28% 4% / 0.5);
+  transform: translateY(-1px);
+}
+
+/* Button shine shimmer */
+#chatterbox-root .btn-shine {
+  position: relative;
+  overflow: hidden;
+}
+#chatterbox-root .btn-shine::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 40%, hsl(0 0% 100% / 0.15) 50%, transparent 60%);
+  background-size: 200% 100%;
+  background-position: -100% 0;
+  transition: background-position 0.5s;
+}
+#chatterbox-root .btn-shine:hover::after {
+  background-position: 100% 0;
+}
+
+/* Gradient text */
+#chatterbox-root .gradient-text {
+  background-image: linear-gradient(
+    120deg,
+    hsl(199 89% 48%) 0%,
+    hsl(188 94% 58%) 50%,
+    hsl(199 89% 48%) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Prose styles for chat markdown */
+#chatterbox-root .prose-chat p { margin: 0 0 0.5rem; }
+#chatterbox-root .prose-chat p:last-child { margin-bottom: 0; }
+#chatterbox-root .prose-chat code {
+  background: hsl(var(--border) / 0.6);
+  padding: 0.1em 0.35em;
+  border-radius: 0.25rem;
+  font-size: 0.875em;
+}
+#chatterbox-root .prose-chat pre {
+  background: hsl(var(--border) / 0.4);
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin: 0.5rem 0;
+}
+#chatterbox-root .prose-chat pre code { background: transparent; padding: 0; }
+#chatterbox-root .prose-chat ul,
+#chatterbox-root .prose-chat ol { margin: 0.25rem 0 0.5rem 1.25rem; }
+#chatterbox-root .prose-chat li { margin: 0.125rem 0; }
+#chatterbox-root .prose-chat a { color: hsl(var(--accent)); text-decoration: underline; }
+#chatterbox-root .prose-chat h1,
+#chatterbox-root .prose-chat h2,
+#chatterbox-root .prose-chat h3 { font-weight: 600; margin: 0.5rem 0 0.25rem; }
+
+/* Typing dots animation */
+#chatterbox-root .typing-dots span {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 1px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: pulseDot 1.4s ease-in-out infinite;
+}
+#chatterbox-root .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+#chatterbox-root .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+/* Modal animations (scoped to avoid conflict) */
+#chatterbox-root .animate-fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+#chatterbox-root .animate-slide-up-modal {
+  animation: slideUp 0.25s cubic-bezier(0.22, 1, 0.36, 1);
 }

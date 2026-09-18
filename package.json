@@ -8,7 +8,9 @@
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.api.json",
+    "test:api": "esbuild scripts/api-smoke-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/api-smoke-test.mjs --log-level=error && node node_modules/.cache/api-smoke-test.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

@@ -193,7 +193,7 @@ const normalizeHistory = (
   (Array.isArray(history) ? history : [])
     .filter((item) => item?.content && (item?.role === "user" || item?.role === "assistant"))
     .slice(-10)
-    .map((item) => ({
+    .map((item): { role: "assistant" | "user"; content: string } => ({
       role: item.role === "assistant" ? "assistant" : "user",
       content: String(item.content),
     }));

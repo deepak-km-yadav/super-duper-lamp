@@ -15,6 +15,7 @@
 import botsHandler from "../api/bots";
 import publicHandler from "../api/bot-public";
 import keysHandler from "../api/provider-keys";
+import { detectSignals, buildContextSnippet } from "../api/_lib/detect";
 
 type Call = { method: string; url: string; body: unknown };
 const calls: Call[] = [];
@@ -226,6 +227,44 @@ async function run() {
     const { res, out } = mkRes();
     await keysHandler({ method: "GET", headers: {} }, res as any);
     check("keys endpoint requires token", out.code === 401, out.payload);
+  }
+
+  console.log("\n-- signal detection --");
+  {
+    const s1 = detectSignals("Hi, I'm Dana, reach me at dana@example.com");
+    check("email detected", s1.email === "dana@example.com", s1);
+    check("no phone false-positive from an email", s1.phone === null, s1);
+    check("plain intro is not a booking", s1.booking === false, s1);
+
+    const s2 = detectSignals("call me on +44 7700 900123");
+    check("phone detected", s2.phone !== null, s2);
+
+    const s3 = detectSignals("the price is 2024 dollars");
+    check("a bare number is not a phone", s3.phone === null, s3);
+
+    const s4 = detectSignals("Can we schedule a demo next Tuesday at 3pm?");
+    check("booking needs intent + time", s4.booking === true, s4);
+
+    const s5 = detectSignals("I'll see you tomorrow");
+    check("a time word alone is not a booking", s5.booking === false, s5);
+
+    const s6 = detectSignals("I'd like to book something");
+    check("intent alone is not a booking", s6.booking === false, s6);
+
+    const s7 = detectSignals("mail dana2024@example.com about the 9am slot");
+    check("email digits are not read as a phone", s7.phone === null, s7);
+
+    const snippet = buildContextSnippet([
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "hi there" },
+      { role: "user", content: "I am dana@example.com" },
+    ]);
+    check("snippet labels both speakers",
+      snippet.includes("Visitor:") && snippet.includes("Bot:"), snippet);
+    check("snippet keeps the latest turn", snippet.includes("dana@example.com"), snippet);
+
+    const long = buildContextSnippet([{ role: "user", content: "x".repeat(2000) }], 100);
+    check("snippet is truncated", long.length <= 100, long.length);
   }
 
   console.log(`\n${pass} passed, ${fail} failed\n`);

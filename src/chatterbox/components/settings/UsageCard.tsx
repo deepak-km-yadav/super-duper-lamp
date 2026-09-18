@@ -8,7 +8,7 @@ import {
   totals,
   type UsageWindow,
 } from "../../lib/usage-store";
-import { listLocal } from "../../lib/local-store";
+import { useBots } from "../../lib/use-bot-store";
 import { getModel, getProvider } from "../../lib/llm-registry";
 import { cn } from "../../lib/utils";
 
@@ -28,8 +28,9 @@ export function UsageCard() {
     [tick, windowSel],
   );
   const t = totals(records);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const bots = React.useMemo(() => listLocal(), [tick]);
+  // Bot names for the per-bot breakdown; usage records themselves stay local.
+  const botsState = useBots();
+  const bots = botsState.status === "ready" ? botsState.data : [];
 
   const cost = computeCost(records);
 

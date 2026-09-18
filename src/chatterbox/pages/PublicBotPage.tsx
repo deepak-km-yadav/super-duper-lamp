@@ -3,13 +3,21 @@ import { Link, useParams } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { PublicChat } from "../components/PublicChat";
 import { decodeBotFromShare } from "../lib/share-encode";
-import { listLocal } from "../lib/local-store";
-import type { Bot } from "../lib/types";
+import { getPublicBot } from "../lib/bot-store";
+import type { Bot, PublicBot } from "../lib/types";
 
 type LoadState =
   | { kind: "loading" }
-  | { kind: "ready"; bot: Bot }
+  /** Server-backed: chat runs through /api/bot-chat, keys stay on the server. */
+  | { kind: "ready"; bot: PublicBot }
+  /**
+   * A pre-server share link that carries the whole config in its URL fragment.
+   * Kept working so links already in the wild do not break, but it can only
+   * chat using a provider key in the visitor's own browser.
+   */
+  | { kind: "legacy"; bot: Bot }
   | { kind: "paused"; name: string }
+  | { kind: "error"; message: string }
   | { kind: "missing" };
 
 export function PublicBotPage() {
@@ -17,11 +25,13 @@ export function PublicBotPage() {
   const [state, setState] = React.useState<LoadState>({ kind: "loading" });
 
   React.useEffect(() => {
+    let cancelled = false;
+
     const hash = window.location.hash ? window.location.hash.slice(1) : "";
     if (hash) {
       const decoded = decodeBotFromShare(hash);
       if (decoded) {
-        setState({ kind: "ready", bot: decoded as Bot });
+        setState({ kind: "legacy", bot: decoded as Bot });
         return;
       }
     }
@@ -31,17 +41,26 @@ export function PublicBotPage() {
       return;
     }
 
-    const local = listLocal().find((b) => b.slug === slug);
-    if (local) {
-      if (local.status !== "PUBLISHED" && local.status !== "DRAFT") {
-        setState({ kind: "paused", name: local.name });
-      } else {
-        setState({ kind: "ready", bot: local });
-      }
-      return;
-    }
+    setState({ kind: "loading" });
+    getPublicBot(slug)
+      .then((result) => {
+        if (cancelled) return;
+        if (result.kind === "ready") setState({ kind: "ready", bot: result.bot });
+        else if (result.kind === "unpublished")
+          setState({ kind: "paused", name: result.name });
+        else setState({ kind: "missing" });
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setState({
+          kind: "error",
+          message: e instanceof Error ? e.message : "Something went wrong.",
+        });
+      });
 
-    setState({ kind: "missing" });
+    return () => {
+      cancelled = true;
+    };
   }, [slug]);
 
   if (state.kind === "loading") {
@@ -68,6 +87,25 @@ export function PublicBotPage() {
     );
   }
 
+  if (state.kind === "error") {
+    return (
+      <main className="grid min-h-screen place-items-center px-6 text-center">
+        <div className="max-w-md">
+          <div className="text-3xl">⚠</div>
+          <h1 className="mt-4 text-xl font-semibold">Couldn't load this bot</h1>
+          <p className="mt-2 text-sm text-muted">{state.message}</p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="mt-6 inline-flex h-10 items-center rounded-lg bg-accent px-4 text-sm font-medium text-accent-fg hover:opacity-90"
+          >
+            Try again
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   if (state.kind === "missing") {
     return (
       <main className="grid min-h-screen place-items-center px-6 text-center">
@@ -75,8 +113,8 @@ export function PublicBotPage() {
           <div className="text-5xl">🤖</div>
           <h1 className="mt-4 text-2xl font-semibold">Bot not found</h1>
           <p className="mt-2 text-sm text-muted">
-            This share link doesn't include the bot's data. Ask the creator to send
-            you their share URL — it carries the full config in the URL itself.
+            This bot doesn't exist, or it has been deleted. Check the link with
+            whoever shared it.
           </p>
           <Link
             to="/chatterbox/dashboard"
@@ -89,9 +127,15 @@ export function PublicBotPage() {
     );
   }
 
+  const embedded = new URLSearchParams(window.location.search).get("embed") === "1";
+
   return (
     <div className="h-screen" style={{ height: "100dvh" }}>
-      <PublicChat bot={state.bot} />
+      {state.kind === "legacy" ? (
+        <PublicChat bot={state.bot} legacy embedded={embedded} />
+      ) : (
+        <PublicChat bot={state.bot} embedded={embedded} />
+      )}
     </div>
   );
 }

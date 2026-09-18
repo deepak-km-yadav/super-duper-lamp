@@ -28,6 +28,8 @@ export const LOCAL_DEFAULTS: Omit<Bot, "id" | "slug" | "createdAt" | "updatedAt"
   tags: [],
   language: "en",
   allowedDomains: [],
+  agentEnabled: false,
+  agentActions: [],
   knowledge: [],
 };
 

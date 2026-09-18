@@ -3,6 +3,7 @@ import { Eraser, Zap } from "lucide-react";
 import { ChatThread } from "../chat/ChatThread";
 import { MessageInput } from "../chat/MessageInput";
 import { useChat } from "../../lib/use-chat";
+import { getAdminToken } from "../../lib/admin-token";
 import { getChatTheme } from "../../lib/chat-themes";
 import { cn } from "../../lib/utils";
 import type { Bot } from "../../lib/types";
@@ -17,16 +18,20 @@ export function TestPanel({ draft }: { draft: Bot }) {
     [],
   );
 
+  // The admin token lets the proxy accept unsaved edits and an unpublished bot,
+  // so the draft can be tested without a provider key in the browser. Knowledge
+  // is not sent: it already lives server-side and is saved as soon as uploaded.
   const { messages, send, stop, regenerate, reset, isStreaming, error, stats } = useChat({
+    slug: draft.slug,
     botId: draft.id,
-    override: {
+    adminToken: getAdminToken(),
+    draft: {
       providerId: draft.providerId,
       modelId: draft.modelId,
       systemPrompt: draft.systemPrompt,
       temperature: draft.temperature,
       maxTokens: draft.maxTokens,
       topP: draft.topP,
-      knowledge: draft.knowledge,
     },
     initialMessages: initial,
   });

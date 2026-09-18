@@ -8,14 +8,17 @@ import { toast } from "./ui/Toast";
 import { useChat } from "../lib/use-chat";
 import { getChatTheme } from "../lib/chat-themes";
 import { cn } from "../lib/utils";
-import type { Bot } from "../lib/types";
+import type { Bot, PublicBot } from "../lib/types";
 
 export function PublicChat({
   bot,
   embedded = false,
+  legacy = false,
 }: {
-  bot: Bot;
+  bot: PublicBot | Bot;
   embedded?: boolean;
+  /** Rendered from a pre-server share link whose config rides in the URL. */
+  legacy?: boolean;
 }) {
   const initial = React.useMemo(
     () =>
@@ -25,17 +28,11 @@ export function PublicChat({
     [bot.greeting],
   );
 
+  // No provider config is passed: the server resolves it from the slug, which
+  // is what lets an embedded bot reply for a visitor who has no API key.
   const { messages, send, stop, regenerate, reset, isStreaming, error } = useChat({
+    slug: bot.slug,
     botId: bot.id,
-    override: {
-      providerId: bot.providerId,
-      modelId: bot.modelId,
-      systemPrompt: bot.systemPrompt,
-      temperature: bot.temperature,
-      maxTokens: bot.maxTokens,
-      topP: bot.topP,
-      knowledge: bot.knowledge,
-    },
     initialMessages: initial,
   });
 
@@ -55,6 +52,13 @@ export function PublicChat({
         ...(theme.textColor ? { color: theme.textColor } : {}),
       }}
     >
+      {legacy && (
+        <div className="bg-yellow-500/10 px-3 py-1.5 text-center text-[11px] text-yellow-600">
+          You're viewing an older share link. Ask the owner for a fresh one if
+          this bot doesn't respond.
+        </div>
+      )}
+
       <header
         className={cn(
           "flex items-center justify-between gap-2 px-3 py-2 sm:gap-3 sm:px-4 sm:py-2.5",

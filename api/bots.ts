@@ -212,7 +212,13 @@ function knowledgeToDoc(r: Record<string, unknown>) {
   };
 }
 
-/** Used by import/create only; day-to-day edits go through api/knowledge.ts. */
+/**
+ * Replaces a bot's knowledge documents wholesale.
+ *
+ * Only called when a patch actually contains `knowledge`, which is on upload or
+ * removal -- the editor's diffed autosave omits it the rest of the time, so
+ * document bodies are not re-posted on every keystroke.
+ */
 async function replaceKnowledge(botId: string, docs: unknown): Promise<void> {
   if (!Array.isArray(docs)) return;
   await sbDelete("knowledge_docs", `bot_id=eq.${botId}`);

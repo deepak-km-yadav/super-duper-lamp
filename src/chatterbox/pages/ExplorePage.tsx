@@ -2,13 +2,15 @@ import * as React from "react";
 import { Link } from "react-router-dom";
 import { Compass, Plus } from "lucide-react";
 import { Avatar } from "../components/ui/Avatar";
-import { listLocal } from "../lib/local-store";
+import { useBots } from "../lib/use-bot-store";
+import { ErrorState } from "../components/AdminGate";
 import type { Bot } from "../lib/types";
 
 export function ExplorePage() {
+  const state = useBots();
   const published = React.useMemo(
-    () => listLocal().filter((b) => b.status === "PUBLISHED"),
-    [],
+    () => (state.status === "ready" ? state.data.filter((b) => b.status === "PUBLISHED") : []),
+    [state],
   );
 
   return (
@@ -22,7 +24,30 @@ export function ExplorePage() {
           </div>
         </div>
 
-        {published.length === 0 ? (
+        {state.status === "error" && (
+          <ErrorState message={state.message} onRetry={state.reload} />
+        )}
+
+        {state.status === "loading" && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div
+                key={i}
+                className="animate-pulse rounded-xl border border-border bg-surface/70 p-5"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="h-11 w-11 rounded-full bg-border/60" />
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 w-1/2 rounded bg-border/60" />
+                    <div className="h-3 w-3/4 rounded bg-border/40" />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {state.status === "ready" && published.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border bg-surface p-12 text-center">
             <Compass className="mx-auto mb-3 text-muted" size={28} />
             <h2 className="font-semibold">No published bots yet</h2>
@@ -37,11 +62,13 @@ export function ExplorePage() {
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {published.map((bot, i) => (
-              <PublishedBotCard key={bot.id} bot={bot} index={i} />
-            ))}
-          </div>
+          published.length > 0 && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {published.map((bot, i) => (
+                <PublishedBotCard key={bot.id} bot={bot} index={i} />
+              ))}
+            </div>
+          )
         )}
       </main>
     </div>

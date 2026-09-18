@@ -5,7 +5,15 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Base URL used to build share and embed links.
+ *
+ * VITE_SITE_URL wins when set, so links generated from a preview deployment
+ * still point at the canonical domain.
+ */
 export function getSiteUrl(): string {
+  const configured = (import.meta.env.VITE_SITE_URL as string | undefined)?.trim();
+  if (configured) return configured.replace(/\/+$/, "");
   if (typeof window !== "undefined") return window.location.origin;
   return "http://localhost:5173";
 }

@@ -26,7 +26,9 @@ let responder: (c: Call) => { status?: number; body: unknown } = () => ({ body: 
 (globalThis as any).fetch = async (url: string, init: any) => {
   const call: Call = {
     method: init?.method ?? "GET",
-    url: String(url).replace("https://stub.supabase.co/rest/v1/", ""),
+    // Strip whatever SUPABASE_URL happens to be, so the test does not depend
+    // on a particular stub host being exported.
+    url: String(url).replace(/^.*\/rest\/v1\//, ""),
     body: init?.body ? JSON.parse(init.body) : undefined,
   };
   calls.push(call);

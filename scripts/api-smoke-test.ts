@@ -16,6 +16,8 @@ import botsHandler from "../api/bots";
 import publicHandler from "../api/bot-public";
 import keysHandler from "../api/provider-keys";
 import { detectSignals, buildContextSnippet } from "../api/_lib/detect";
+import actionItemsHandler from "../api/action-items";
+import { toCsvForTest } from "./csv-helper";
 
 type Call = { method: string; url: string; body: unknown };
 const calls: Call[] = [];
@@ -227,6 +229,98 @@ async function run() {
     const { res, out } = mkRes();
     await keysHandler({ method: "GET", headers: {} }, res as any);
     check("keys endpoint requires token", out.code === 401, out.payload);
+  }
+
+  console.log("\n-- action items --");
+  {
+    const { res, out } = mkRes();
+    await actionItemsHandler({ method: "GET", headers: {} }, res as any);
+    check("action items require a token", out.code === 401, out.payload);
+  }
+  {
+    responder = (c) => {
+      if (c.url.startsWith("leads")) {
+        return { body: [{
+          id: 1, bot_id: "b1", session_id: "s1", name: "Dana",
+          email: "dana@example.com", phone: null, company: null, intent: "demo",
+          summary: "Wants a demo", context_snippet: "Visitor: hi", status: "NEW",
+          detected_by: "hybrid", created_at: "2026-09-01T10:00:00Z",
+        }] };
+      }
+      if (c.url.startsWith("meeting_requests")) {
+        return { body: [{
+          id: 2, bot_id: "b1", session_id: "s1", name: "Dana", email: null,
+          requested_for_text: "next Tuesday 3pm", timezone: null, topic: "Demo",
+          context_snippet: "Visitor: can we meet", status: "NEW",
+          created_at: "2026-09-01T11:00:00Z",
+        }] };
+      }
+      return { body: [{ id: "b1", name: "My Bot" }] };
+    };
+    const { res, out } = mkRes();
+    await actionItemsHandler(
+      { method: "GET", headers: { "x-admin-token": "admin-secret-token" } },
+      res as any,
+    );
+    const lead = out.payload.leads[0];
+    const meeting = out.payload.meetings[0];
+    check("lead mapped to camelCase", lead.contextSnippet === "Visitor: hi", lead);
+    check("bot name resolved", lead.botName === "My Bot", lead);
+    check("meeting mapped", meeting.requestedFor === "next Tuesday 3pm", meeting);
+    check("context snippet present on both",
+      Boolean(lead.contextSnippet && meeting.contextSnippet));
+  }
+  {
+    // A deleted bot must not blow up the page.
+    responder = (c) =>
+      c.url.startsWith("bots")
+        ? { body: [] }
+        : c.url.startsWith("leads")
+          ? { body: [{ id: 1, bot_id: "gone", context_snippet: "", status: "NEW", created_at: "x" }] }
+          : { body: [] };
+    const { res, out } = mkRes();
+    await actionItemsHandler(
+      { method: "GET", headers: { "x-admin-token": "admin-secret-token" } },
+      res as any,
+    );
+    check("missing bot degrades gracefully",
+      out.payload.leads[0].botName === "Deleted bot", out.payload.leads[0]);
+  }
+  {
+    const { res, out } = mkRes();
+    await actionItemsHandler(
+      {
+        method: "PATCH",
+        headers: { "x-admin-token": "admin-secret-token" },
+        body: { kind: "lead", id: 1, status: "BOGUS" },
+      },
+      res as any,
+    );
+    check("invalid status rejected", out.code === 400, out.payload);
+  }
+  {
+    const { res, out } = mkRes();
+    await actionItemsHandler(
+      {
+        method: "PATCH",
+        headers: { "x-admin-token": "admin-secret-token" },
+        body: { kind: "elephant", id: 1, status: "NEW" },
+      },
+      res as any,
+    );
+    check("invalid kind rejected", out.code === 400, out.payload);
+  }
+
+  console.log("\n-- csv export --");
+  {
+    const csv = toCsvForTest(
+      [{ name: 'Dana "D" Smith', note: "line1\nline2", email: "a,b@x.com" }],
+      ["name", "note", "email"],
+    );
+    check("quotes are escaped", csv.includes('"Dana ""D"" Smith"'), csv);
+    check("newlines are quoted", csv.includes('"line1\nline2"'), csv);
+    check("commas are quoted", csv.includes('"a,b@x.com"'), csv);
+    check("header row present", csv.startsWith("name,note,email"), csv);
   }
 
   console.log("\n-- signal detection --");

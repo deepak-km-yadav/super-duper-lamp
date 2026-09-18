@@ -3,14 +3,14 @@ import { Link, useNavigate } from "react-router-dom";
 import { Copy, Download, Loader2, MessageSquare, Pencil, Plus, Search, Share2, Trash2, Upload, X } from "lucide-react";
 import { Avatar } from "../components/ui/Avatar";
 import { toast } from "../components/ui/Toast";
-import { fmtDate } from "../lib/utils";
+import { fmtDate, getSiteUrl } from "../lib/utils";
 import type { Bot } from "../lib/types";
 import { removeBot, createBot, migrateLocalBotsOnce } from "../lib/bot-store";
 import { useBots } from "../lib/use-bot-store";
 import { hasAdminToken, isAuthError } from "../lib/admin-token";
 import { AdminTokenPrompt, ErrorState } from "../components/AdminGate";
+import { ChatterboxNav } from "../components/ChatterboxNav";
 import { exportBots, importBots } from "../lib/bot-io";
-import { encodeBotForShare } from "../lib/share-encode";
 import { PROVIDER_NAMES } from "../lib/llm-registry";
 
 
@@ -77,8 +77,7 @@ export function DashboardPage() {
   };
 
   const onShare = (b: Bot) => {
-    const fragment = encodeBotForShare(b);
-    const url = `${window.location.origin}/chatterbox/chat/${b.slug}#${fragment}`;
+    const url = `${getSiteUrl()}/chatterbox/chat/${b.slug}`;
     if (navigator.share) {
       navigator.share({ title: b.name, url }).catch(() => {});
     } else {
@@ -106,6 +105,7 @@ export function DashboardPage() {
   return (
     <div className="bg-orbs" style={{ minHeight: "100%" }}>
       <main className="relative mx-auto max-w-6xl px-3 py-6 sm:px-4 sm:py-10">
+        <ChatterboxNav />
         <div className="mb-5 flex animate-slide-down flex-col gap-3 sm:mb-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Your Bots</h1>

@@ -24,7 +24,7 @@ import { KnowledgeUpload } from "./KnowledgeUpload";
 import { ProviderSelect } from "./ProviderSelect";
 import { ShareModal } from "./ShareModal";
 import { TestPanel } from "./TestPanel";
-import type { Bot, KnowledgeDoc } from "../../lib/types";
+import type { AgentAction, Bot, KnowledgeDoc } from "../../lib/types";
 import { TEMPLATES } from "../../lib/templates";
 import { initialsFromName } from "../../lib/utils";
 import { beaconSave, removeBot, setBotStatus, updateBot } from "../../lib/bot-store";
@@ -571,6 +571,10 @@ function PromptPanel({
         />
       </div>
 
+      <div className="mt-6">
+        <AgentPanel bot={bot} update={update} />
+      </div>
+
       <button
         onClick={() => setShowAdvanced((v) => !v)}
         className="mt-6 inline-flex items-center gap-1.5 text-xs font-medium text-muted hover:text-fg"
@@ -629,6 +633,106 @@ function PromptPanel({
         </div>
       )}
     </>
+  );
+}
+
+const AGENT_ACTIONS: {
+  id: AgentAction;
+  label: string;
+  description: string;
+}[] = [
+  {
+    id: "lead_magnet",
+    label: "Lead Magnet",
+    description:
+      "Detects when a name, email or phone number comes up in chat and saves it as a lead.",
+  },
+  {
+    id: "scheduler",
+    label: "Scheduler",
+    description:
+      "Detects a requested date and time and saves it as a meeting request.",
+  },
+];
+
+/**
+ * "Act as an Agent" -- lets the bot do something with a conversation beyond
+ * replying to it. Everything captured shows up on the Action Items page.
+ */
+function AgentPanel({
+  bot,
+  update,
+}: {
+  bot: Bot;
+  update: <K extends keyof Bot>(key: K, value: Bot[K]) => void;
+}) {
+  const enabled = bot.agentEnabled ?? false;
+  const actions = bot.agentActions ?? [];
+
+  const toggleAction = (id: AgentAction, on: boolean) => {
+    const next = on ? [...new Set([...actions, id])] : actions.filter((a) => a !== id);
+    update("agentActions", next);
+  };
+
+  return (
+    <div className="rounded-lg border border-border bg-bg/40 p-3">
+      <label className="flex cursor-pointer items-start gap-3">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => update("agentEnabled", e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded"
+        />
+        <span className="min-w-0">
+          <span className="flex items-center gap-1.5 text-sm font-medium">
+            <Sparkles size={13} className="text-accent" /> Act as an Agent
+          </span>
+          <span className="mt-0.5 block text-xs text-muted">
+            Let this bot act on the conversation, not just reply to it.
+          </span>
+        </span>
+      </label>
+
+      {enabled && (
+        <div className="mt-3 space-y-2 border-t border-border pt-3">
+          <p className="text-xs font-medium text-muted">What should it do?</p>
+          {AGENT_ACTIONS.map((action) => (
+            <label
+              key={action.id}
+              className="flex cursor-pointer items-start gap-3 rounded-md p-2 hover:bg-border/30"
+            >
+              <input
+                type="checkbox"
+                checked={actions.includes(action.id)}
+                onChange={(e) => toggleAction(action.id, e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">{action.label}</span>
+                <span className="mt-0.5 block text-xs text-muted">
+                  {action.description}
+                </span>
+              </span>
+            </label>
+          ))}
+
+          {actions.length === 0 ? (
+            <p className="rounded-md border border-yellow-500/30 bg-yellow-500/5 px-2 py-1.5 text-xs text-yellow-600">
+              Pick at least one action, or the bot will behave exactly as before.
+            </p>
+          ) : (
+            <p className="text-xs text-muted">
+              Captured items appear under{" "}
+              <Link to="/chatterbox/action-items" className="text-accent hover:underline">
+                Action Items
+              </Link>
+              . The bot will also be nudged to ask for these details naturally
+              rather than only listening for them.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

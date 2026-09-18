@@ -4,6 +4,7 @@ import { Compass, Plus } from "lucide-react";
 import { Avatar } from "../components/ui/Avatar";
 import { useBots } from "../lib/use-bot-store";
 import { ErrorState } from "../components/AdminGate";
+import { ChatterboxNav } from "../components/ChatterboxNav";
 import type { Bot } from "../lib/types";
 
 export function ExplorePage() {
@@ -16,6 +17,7 @@ export function ExplorePage() {
   return (
     <div className="bg-orbs" style={{ minHeight: "100%" }}>
       <main className="relative mx-auto max-w-6xl px-3 py-6 sm:px-4 sm:py-10">
+        <ChatterboxNav />
         <div className="mb-6 flex animate-slide-down items-center gap-2 sm:mb-8">
           <Compass size={20} className="text-accent" />
           <div>

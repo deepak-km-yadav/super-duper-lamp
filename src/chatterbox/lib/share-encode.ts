@@ -1,49 +1,17 @@
 import type { Bot, KnowledgeDoc } from "./types";
 
-const SHARE_KNOWLEDGE_BUDGET = 16_000;
-
-export function trimKnowledgeForShare(docs: KnowledgeDoc[] | undefined): KnowledgeDoc[] {
-  if (!docs || docs.length === 0) return [];
-  const out: KnowledgeDoc[] = [];
-  let used = 0;
-  for (const d of docs) {
-    if (used + d.content.length > SHARE_KNOWLEDGE_BUDGET) break;
-    out.push(d);
-    used += d.content.length;
-  }
-  return out;
-}
-
-export function encodeBotForShare(bot: Bot): string {
-  const minimal = {
-    v: 1,
-    id: bot.id,
-    sl: bot.slug,
-    n: bot.name,
-    b: bot.bio,
-    d: bot.description,
-    ai: bot.avatarInitials,
-    au: bot.avatarUrl,
-    tc: bot.themeColor,
-    sp: bot.systemPrompt,
-    g: bot.greeting,
-    sP: bot.starterPrompts,
-    p: bot.providerId,
-    m: bot.modelId,
-    t: bot.temperature,
-    mt: bot.maxTokens,
-    tp: bot.topP,
-    ct: bot.chatTheme,
-    k: trimKnowledgeForShare(bot.knowledge),
-  };
-  const json = JSON.stringify(minimal);
-  const utf8 = new TextEncoder().encode(json);
-  let bin = "";
-  for (let i = 0; i < utf8.length; i++) bin += String.fromCharCode(utf8[i]);
-  const b64 = btoa(bin);
-  return b64.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
+/**
+ * Decoder for pre-server share links.
+ *
+ * Bots used to live only in the author's browser, so a share link had to carry
+ * the entire configuration base64-encoded in its URL fragment. That produced
+ * links of 30KB or more, could not be revoked once sent, exposed the system
+ * prompt to anyone who decoded it, and still could not chat without a provider
+ * key in the visitor's own browser.
+ *
+ * Bots are now served by slug, so nothing encodes this format any more. The
+ * decoder stays so links already shared keep working.
+ */
 export function decodeBotFromShare(encoded: string): Partial<Bot> | null {
   try {
     let b64 = encoded.replace(/-/g, "+").replace(/_/g, "/");

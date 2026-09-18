@@ -2,7 +2,6 @@ import * as React from "react";
 import { Check, Copy, Download, ExternalLink } from "lucide-react";
 import { Modal } from "../ui/Modal";
 import { Button } from "../ui/Button";
-import { encodeBotForShare } from "../../lib/share-encode";
 import type { Bot } from "../../lib/types";
 
 type Tab = "link" | "iframe" | "widget" | "qr";
@@ -20,9 +19,12 @@ export function ShareModal({
 }) {
   const [tab, setTab] = React.useState<Tab>("link");
 
-  const fragment = React.useMemo(() => encodeBotForShare(bot), [bot]);
-  const publicUrl = `${siteUrl}/chatterbox/chat/${bot.slug}#${fragment}`;
-  const embedUrl = `${siteUrl}/chatterbox/chat/${bot.slug}#${fragment}`;
+  // Bots live on the server now, so links are short and carry no config. The
+  // old format encoded the whole bot into a URL fragment, which produced links
+  // of 30KB or more, could not be revoked, and exposed the system prompt to
+  // anyone who cared to base64-decode it.
+  const publicUrl = `${siteUrl}/chatterbox/chat/${bot.slug}`;
+  const embedUrl = `${publicUrl}?embed=1`;
   const iframeSnippet = `<iframe
   src="${embedUrl}"
   width="400"
@@ -30,14 +32,15 @@ export function ShareModal({
   style="border:1px solid #e2e8f0;border-radius:12px"
   title="${bot.name}"
 ></iframe>`;
-  const widgetSnippet = `<script src="${siteUrl}/embed.js" data-bot-slug="${bot.slug}" data-bot-data="${fragment}" data-color="${bot.themeColor}" defer></script>`;
+  const widgetSnippet = `<script src="${siteUrl}/embed.js" data-bot-slug="${bot.slug}" data-color="${bot.themeColor}" defer></script>`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(publicUrl)}`;
 
   return (
     <Modal open={open} onClose={onClose} title="Share your bot" maxWidth="max-w-2xl">
       {bot.status !== "PUBLISHED" && (
         <div className="mb-4 rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-500">
-          ⚠ This bot is currently <strong>{bot.status.toLowerCase()}</strong>. The share link still works — it carries the full config in the URL fragment.
+          ⚠ This bot is <strong>{bot.status.toLowerCase()}</strong>, so these links
+          won't work for anyone else yet. Publish it to make them live.
         </div>
       )}
 
@@ -58,7 +61,9 @@ export function ShareModal({
       {tab === "link" && (
         <div className="space-y-3">
           <p className="text-sm text-muted">
-            Share this link anywhere. The full bot config is encoded in the URL so it works without a server.
+            Share this link anywhere. Anyone who opens it can chat straight away —
+            they don't need an API key of their own. Unpublish the bot to switch
+            the link off.
           </p>
           <CopyBox value={publicUrl} />
           <a
@@ -75,7 +80,9 @@ export function ShareModal({
       {tab === "iframe" && (
         <div className="space-y-3">
           <p className="text-sm text-muted">
-            Drop this iframe into any website to embed your bot as a fixed-size chat panel.
+            Drop this iframe into any website to embed your bot as a fixed-size
+            chat panel. To restrict which sites may embed it, list them under
+            Allowed domains in the bot's settings.
           </p>
           <CopyBox value={iframeSnippet} multiline />
         </div>
@@ -84,7 +91,9 @@ export function ShareModal({
       {tab === "widget" && (
         <div className="space-y-3">
           <p className="text-sm text-muted">
-            Add this script tag and a floating chat bubble appears on the bottom-right of your site.
+            Add this script tag and a floating chat bubble appears on the
+            bottom-right of your site. Add <code>data-position="left"</code> to
+            move it, or <code>data-label="..."</code> to change its tooltip.
           </p>
           <CopyBox value={widgetSnippet} multiline />
         </div>

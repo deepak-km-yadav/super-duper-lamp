@@ -7,6 +7,7 @@ import { EditBotPage } from "./pages/EditBotPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { PublicBotPage } from "./pages/PublicBotPage";
 import { ExplorePage } from "./pages/ExplorePage";
+import { ActionItemsPage } from "./pages/ActionItemsPage";
 
 export function ChatterboxApp() {
   return (
@@ -17,6 +18,7 @@ export function ChatterboxApp() {
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="bots/new" element={<NewBotPage />} />
         <Route path="bots/:id/edit" element={<EditBotPage />} />
+        <Route path="action-items" element={<ActionItemsPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="explore" element={<ExplorePage />} />
         <Route path="chat/:slug" element={<PublicBotPage />} />

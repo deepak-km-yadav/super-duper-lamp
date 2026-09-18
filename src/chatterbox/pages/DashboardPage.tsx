@@ -8,21 +8,8 @@ import type { Bot } from "../lib/types";
 import { listLocal, removeLocal, createLocal } from "../lib/local-store";
 import { exportBots, importBots } from "../lib/bot-io";
 import { encodeBotForShare } from "../lib/share-encode";
+import { PROVIDER_NAMES } from "../lib/llm-registry";
 
-const PROVIDER_NAMES: Record<string, string> = {
-  anthropic: "Anthropic",
-  openai: "OpenAI",
-  google: "Google",
-  mistral: "Mistral",
-  groq: "Groq",
-  xai: "xAI",
-  cohere: "Cohere",
-  perplexity: "Perplexity",
-  deepseek: "DeepSeek",
-  together: "Together AI",
-  openrouter: "OpenRouter",
-  ollama: "Ollama",
-};
 
 export function DashboardPage() {
   const navigate = useNavigate();

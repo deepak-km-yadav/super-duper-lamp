@@ -22,10 +22,14 @@ export const PROVIDERS: ProviderMeta[] = [
     name: "Anthropic",
     envKey: "ANTHROPIC_API_KEY",
     models: [
-      { id: "claude-opus-4-7", name: "Claude Opus 4.7", contextWindow: 200000, supportsVision: true, supportsTools: true, pricePerMTokIn: 15, pricePerMTokOut: 75 },
-      { id: "claude-opus-4-6", name: "Claude Opus 4.6", contextWindow: 200000, supportsVision: true, supportsTools: true, pricePerMTokIn: 15, pricePerMTokOut: 75 },
-      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", contextWindow: 200000, supportsVision: true, supportsTools: true, pricePerMTokIn: 3, pricePerMTokOut: 15 },
+      { id: "claude-fable-5-1", name: "Claude Fable 5.1", contextWindow: 1000000, supportsVision: true, supportsTools: true, pricePerMTokIn: 10, pricePerMTokOut: 50 },
+      { id: "claude-opus-5", name: "Claude Opus 5", contextWindow: 1000000, supportsVision: true, supportsTools: true, pricePerMTokIn: 5, pricePerMTokOut: 25 },
+      { id: "claude-opus-4-8", name: "Claude Opus 4.8", contextWindow: 1000000, supportsVision: true, supportsTools: true, pricePerMTokIn: 5, pricePerMTokOut: 25 },
+      { id: "claude-sonnet-5", name: "Claude Sonnet 5", contextWindow: 1000000, supportsVision: true, supportsTools: true, pricePerMTokIn: 2, pricePerMTokOut: 10 },
       { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", contextWindow: 200000, supportsVision: true, supportsTools: true, pricePerMTokIn: 1, pricePerMTokOut: 5 },
+      { id: "claude-opus-4-7", name: "Claude Opus 4.7", contextWindow: 1000000, supportsVision: true, supportsTools: true, pricePerMTokIn: 5, pricePerMTokOut: 25, legacy: true },
+      { id: "claude-opus-4-6", name: "Claude Opus 4.6", contextWindow: 1000000, supportsVision: true, supportsTools: true, pricePerMTokIn: 5, pricePerMTokOut: 25, legacy: true },
+      { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", contextWindow: 1000000, supportsVision: true, supportsTools: true, pricePerMTokIn: 3, pricePerMTokOut: 15, legacy: true },
       { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet", contextWindow: 200000, supportsVision: true, supportsTools: true, pricePerMTokIn: 3, pricePerMTokOut: 15, legacy: true },
       { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku", contextWindow: 200000, supportsTools: true, pricePerMTokIn: 0.8, pricePerMTokOut: 4, legacy: true },
       { id: "claude-3-opus-20240229", name: "Claude 3 Opus", contextWindow: 200000, supportsVision: true, supportsTools: true, pricePerMTokIn: 15, pricePerMTokOut: 75, legacy: true },
@@ -168,10 +172,26 @@ export function getModel(providerId: string, modelId: string): ModelMeta | undef
 
 export type ProviderStatus = ProviderMeta & { available: boolean };
 
-export function getProviderStatuses(): ProviderStatus[] {
-  return PROVIDERS.map((p) => ({ ...p, available: false }));
+/**
+ * Which providers have a key configured on the server. Populated by
+ * `setAvailableProviders()` once `/api/provider-keys` has answered; until then
+ * nothing is known to be available.
+ */
+let availableProviderIds: ReadonlySet<string> = new Set();
+
+export function setAvailableProviders(ids: Iterable<string>): void {
+  availableProviderIds = new Set(ids);
 }
 
-export function isProviderAvailable(_providerId: string): boolean {
-  return false;
+export function isProviderAvailable(providerId: string): boolean {
+  return availableProviderIds.has(providerId);
 }
+
+export function getProviderStatuses(): ProviderStatus[] {
+  return PROVIDERS.map((p) => ({ ...p, available: isProviderAvailable(p.id) }));
+}
+
+/** Display names, derived from PROVIDERS so the list cannot drift. */
+export const PROVIDER_NAMES: Record<string, string> = Object.fromEntries(
+  PROVIDERS.map((p) => [p.id, p.name]),
+);

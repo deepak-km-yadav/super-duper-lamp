@@ -16,7 +16,7 @@ export const LOCAL_DEFAULTS: Omit<Bot, "id" | "slug" | "createdAt" | "updatedAt"
   greeting: "Hi! How can I help you today?",
   starterPrompts: [],
   providerId: "anthropic",
-  modelId: "claude-haiku-4-5",
+  modelId: "claude-sonnet-5",
   temperature: 0.7,
   maxTokens: 1024,
   topP: 1,

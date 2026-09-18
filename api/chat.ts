@@ -54,7 +54,7 @@ type KnowledgeBundle = {
 };
 
 const XAI_URL = "https://api.x.ai/v1/chat/completions";
-const XAI_MODEL = process.env.XAI_MODEL || "grok-3-mini";
+const XAI_MODEL = process.env.XAI_MODEL || "grok-3";
 const LEAD_CAPTURE_WEBHOOK_URL = process.env.LEAD_CAPTURE_WEBHOOK_URL || "";
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";

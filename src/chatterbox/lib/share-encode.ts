@@ -67,7 +67,7 @@ export function decodeBotFromShare(encoded: string): Partial<Bot> | null {
       greeting: (m.g as string) ?? "",
       starterPrompts: (m.sP as string[]) ?? [],
       providerId: (m.p as string) ?? "anthropic",
-      modelId: (m.m as string) ?? "claude-haiku-4-5",
+      modelId: (m.m as string) ?? "claude-sonnet-5",
       temperature: (m.t as number) ?? 0.7,
       maxTokens: (m.mt as number) ?? 1024,
       topP: (m.tp as number) ?? 1,

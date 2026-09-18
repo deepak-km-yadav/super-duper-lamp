@@ -283,6 +283,11 @@ export function useChat(opts: UseChatOptions) {
               sessionId: result.sessionId,
               slug: current.slug,
               assistant: acc,
+              promptTokens,
+              completionTokens,
+              providerId: result.providerId,
+              modelId: result.modelId,
+              latencyMs,
             }),
             keepalive: true,
           }).catch(() => {

@@ -29,6 +29,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   const body = jsonBody(req);
   const sessionId = String(body.sessionId || "").trim();
   const assistant = String(body.assistant || "").trim();
+  const num = (v: unknown): number | null => {
+    const n = Number(v);
+    return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+  };
   if (!sessionId) return res.status(400).json({ error: "sessionId is required" });
 
   try {
@@ -45,6 +49,14 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         bot_id: session.bot_id,
         role: "assistant",
         content: assistant.slice(0, 20000),
+        // Usage is recorded here rather than only in the browser, so the
+        // numbers survive a cleared cache and cover every visitor, not just
+        // whoever happened to be at this device.
+        prompt_tokens: num(body.promptTokens),
+        completion_tokens: num(body.completionTokens),
+        provider_id: body.providerId ? String(body.providerId) : null,
+        model_id: body.modelId ? String(body.modelId) : null,
+        latency_ms: num(body.latencyMs),
       });
     }
 

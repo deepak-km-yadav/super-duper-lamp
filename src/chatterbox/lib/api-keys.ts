@@ -8,42 +8,22 @@
  */
 
 import type { ApiKeyMap } from "./types";
-import { getAdminToken } from "./admin-token";
+import { apiFetch } from "./api-client";
 
 export type ProviderKeyInfo = { providerId: string; hint: string };
 
-async function request<T>(init: RequestInit & { url?: string }): Promise<T> {
-  const res = await fetch(init.url ?? "/api/provider-keys", {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      "x-admin-token": getAdminToken(),
-      ...(init.headers as Record<string, string> | undefined),
-    },
-  });
-  const text = await res.text();
-  const body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
-  if (!res.ok) {
-    throw new Error(
-      typeof body.error === "string" ? body.error : `Request failed (${res.status})`,
-    );
-  }
-  return body as T;
-}
-
 export async function listProviderKeys(): Promise<ProviderKeyInfo[]> {
-  const { keys } = await request<{ keys: ProviderKeyInfo[] }>({ method: "GET" });
+  const { keys } = await apiFetch<{ keys: ProviderKeyInfo[] }>("/api/provider-keys");
   return keys ?? [];
 }
 
 export async function saveProviderKey(providerId: string, apiKey: string): Promise<void> {
-  await request({ method: "PUT", body: JSON.stringify({ providerId, apiKey }) });
+  await apiFetch("/api/provider-keys", { method: "PUT", body: { providerId, apiKey } });
 }
 
 export async function deleteProviderKey(providerId: string): Promise<void> {
-  await request({
+  await apiFetch(`/api/provider-keys?providerId=${encodeURIComponent(providerId)}`, {
     method: "DELETE",
-    url: `/api/provider-keys?providerId=${encodeURIComponent(providerId)}`,
   });
 }
 

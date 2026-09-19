@@ -7,15 +7,15 @@
  * reply -- is picked up by api/detect-sweep.ts.
  */
 
-import { sbSelect, sbSelectOne, sbInsert, sbUpdate, SupabaseError } from "./_lib/supabase";
-import { applyCors, jsonBody, type ApiRequest, type ApiResponse } from "./_lib/http";
-import { buildContextSnippet } from "./_lib/detect";
+import { sbSelect, sbSelectOne, sbInsert, sbUpdate, SupabaseError } from "./_lib/supabase.js";
+import { applyCors, jsonBody, type ApiRequest, type ApiResponse } from "./_lib/http.js";
+import { buildContextSnippet } from "./_lib/detect.js";
 import {
   extractLead,
   extractMeeting,
   buildTranscript,
   isExtractionConfigured,
-} from "./_lib/extract";
+} from "./_lib/extract.js";
 
 type SessionRow = { id: string; bot_id: string; analyzed_at: string | null };
 type BotRow = { id: string; agent_enabled: boolean; agent_actions: string[] };

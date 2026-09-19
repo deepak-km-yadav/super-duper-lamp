@@ -6,9 +6,9 @@
  * of routing chat through api/bot-chat.ts is that the browser never sees them.
  */
 
-import { sbSelectOne, SupabaseError } from "./_lib/supabase";
-import { rowToBot, PUBLIC_BOT_COLUMNS } from "./_lib/bot";
-import { applyCors, queryParam, type ApiRequest, type ApiResponse } from "./_lib/http";
+import { sbSelectOne, SupabaseError } from "./_lib/supabase.js";
+import { rowToBot, PUBLIC_BOT_COLUMNS } from "./_lib/bot.js";
+import { applyCors, queryParam, type ApiRequest, type ApiResponse } from "./_lib/http.js";
 
 type PublicRow = {
   id: string;

@@ -8,9 +8,9 @@
  * Guarded by CRON_SECRET; Vercel sends it as a bearer token on scheduled runs.
  */
 
-import { sbSelect, SupabaseError } from "./_lib/supabase";
-import { applyCors, header, queryParam, type ApiRequest, type ApiResponse } from "./_lib/http";
-import { analyzeSession } from "./chat-turn";
+import { sbSelect, SupabaseError } from "./_lib/supabase.js";
+import { applyCors, header, queryParam, type ApiRequest, type ApiResponse } from "./_lib/http.js";
+import { analyzeSession } from "./chat-turn.js";
 
 const CRON_SECRET = process.env.CRON_SECRET || "";
 const BATCH = 25;

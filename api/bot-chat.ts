@@ -19,9 +19,9 @@ import {
   ProviderError,
   type ChatTurn,
   type ProviderConfig,
-} from "./_lib/llm-stream";
-import { detectSignals, hasLeadSignal, buildContextSnippet } from "./_lib/detect";
-import { isAdminToken } from "./_lib/auth";
+} from "./_lib/llm-stream.js";
+import { detectSignals, hasLeadSignal, buildContextSnippet } from "./_lib/detect.js";
+import { isAdminToken } from "./_lib/auth.js";
 
 export const config = { runtime: "edge" };
 

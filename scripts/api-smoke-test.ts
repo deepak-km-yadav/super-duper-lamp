@@ -368,6 +368,41 @@ async function run() {
       !JSON.stringify(out.payload).includes("admin-secret-token"), out.payload);
   }
 
+  console.log("\n-- health distinguishes the three Supabase failures --");
+  {
+    const cases: [string, number, unknown, RegExp][] = [
+      [
+        "privilege error is not misread as a bad key",
+        401,
+        { code: "42501", message: "permission denied for table bots" },
+        /0002_grants\.sql/,
+      ],
+      [
+        "missing table points at the schema migration",
+        404,
+        { code: "PGRST205", message: 'relation "public.bots" does not exist' },
+        /0001_botforge\.sql/,
+      ],
+      [
+        "a genuinely bad key is reported as a bad key",
+        401,
+        { message: "Invalid authentication credentials" },
+        /service_role \(secret\) key/,
+      ],
+    ];
+    for (const [name, status, body, expected] of cases) {
+      responder = () => ({ status, body });
+      const { res, out } = mkRes();
+      await healthHandler(
+        { method: "GET", headers: { "x-admin-token": "admin-secret-token" } },
+        res as any,
+      );
+      const detail = out.payload.tables?.bots?.detail ?? "";
+      check(name, expected.test(detail), detail);
+    }
+    responder = () => ({ body: [] });
+  }
+
   console.log("\n-- client error messages --");
   {
     // The failure the user actually hit: /api falls through to the SPA and

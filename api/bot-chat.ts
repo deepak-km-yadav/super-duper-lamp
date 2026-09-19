@@ -246,15 +246,29 @@ export default async function handler(req: Request): Promise<Response> {
 
   // Session + the visitor's turn are recorded before streaming, so a lead
   // survives even if the visitor closes the tab mid-reply.
-  const sessionId = isAdmin ? null : await ensureSession(bot.id, body.sessionId, req, ipHash);
+  //
+  // Admin requests are recorded too, flagged as tests. They used to be skipped
+  // entirely, which meant the editor's Live test panel -- the obvious place to
+  // check that Lead Magnet works -- captured nothing and said nothing.
+  const isTest = isAdmin;
+  const sessionId = await ensureSession(bot.id, body.sessionId, req, ipHash, isTest);
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
   const signals = lastUser ? detectSignals(lastUser.content) : null;
 
+  let captureError: string | null = null;
   if (sessionId && lastUser) {
-    await recordUserTurn(bot, sessionId, lastUser.content, signals, messages);
+    captureError = await recordUserTurn(
+      bot,
+      sessionId,
+      lastUser.content,
+      signals,
+      messages,
+      isTest,
+    );
   }
 
-  return streamResponse(cfg, messages, sessionId, cors);
+  // Only the person testing sees why a capture failed; visitors never do.
+  return streamResponse(cfg, messages, sessionId, cors, isTest ? captureError : null);
 }
 
 function sanitizeMessages(input: unknown): ChatTurn[] {
@@ -334,19 +348,23 @@ async function ensureSession(
   sessionId: string | undefined,
   req: Request,
   ipHash: string,
+  isTest: boolean,
 ): Promise<string | null> {
   try {
     if (sessionId) {
-      const rows = await sbJson<{ id: string }[]>(
-        `chat_sessions?select=id&id=eq.${sessionId}&bot_id=eq.${botId}&limit=1`,
+      const rows = await sbJson<{ id: string; is_test: boolean }[]>(
+        `chat_sessions?select=id,is_test&id=eq.${sessionId}&bot_id=eq.${botId}&limit=1`,
       );
-      if (rows?.[0]) return rows[0].id;
+      // A session id from the other mode must not be reused, or an editor test
+      // would continue a visitor's conversation, or vice versa.
+      if (rows?.[0] && rows[0].is_test === isTest) return rows[0].id;
     }
     const created = await sbJson<{ id: string }[]>("chat_sessions", {
       method: "POST",
       headers: { Prefer: "return=representation" },
       body: JSON.stringify({
         bot_id: botId,
+        is_test: isTest,
         visitor_ip_hash: ipHash,
         user_agent: (req.headers.get("user-agent") || "").slice(0, 400),
         referrer: (req.headers.get("referer") || "").slice(0, 400),
@@ -359,13 +377,30 @@ async function ensureSession(
   }
 }
 
+/**
+ * Records the visitor's turn and any signal the regex pass found.
+ *
+ * Returns a reason on failure rather than throwing: capture must never break
+ * the conversation. It used to swallow errors entirely, which meant a failed
+ * insert -- a missing grant, a constraint violation -- was completely
+ * invisible, so a lead that never arrived looked identical to a lead that was
+ * never detected.
+ */
 async function recordUserTurn(
   bot: BotRow,
   sessionId: string,
   content: string,
   signals: ReturnType<typeof detectSignals> | null,
   messages: ChatTurn[],
-): Promise<void> {
+  isTest: boolean,
+): Promise<string | null> {
+  const fail = (what: string, e: unknown): string => {
+    const reason = e instanceof Error ? e.message : String(e);
+    // Visible in the Vercel function logs even when the caller is a visitor.
+    console.error(`[capture] ${what} failed for bot ${bot.id}: ${reason}`);
+    return `${what} failed: ${reason.slice(0, 300)}`;
+  };
+
   try {
     await sb("chat_messages", {
       method: "POST",
@@ -384,15 +419,19 @@ async function recordUserTurn(
       method: "PATCH",
       body: JSON.stringify({ last_message_at: new Date().toISOString() }),
     });
+  } catch (e) {
+    return fail("Recording the message", e);
+  }
 
-    if (!bot.agent_enabled || !signals) return;
-    const actions = Array.isArray(bot.agent_actions) ? bot.agent_actions : [];
-    const snippet = buildContextSnippet(messages);
+  if (!bot.agent_enabled || !signals) return null;
+  const actions = Array.isArray(bot.agent_actions) ? bot.agent_actions : [];
+  const snippet = buildContextSnippet(messages);
 
-    // Provisional rows, written before the reply streams. The enrichment pass
-    // in api/chat-turn.ts fills in the name and summary afterwards.
-    if (actions.includes("lead_magnet") && hasLeadSignal(signals)) {
-      await sb("leads", {
+  // Provisional rows, written before the reply streams. The enrichment pass in
+  // api/chat-turn.ts fills in the name and summary afterwards.
+  if (actions.includes("lead_magnet") && hasLeadSignal(signals)) {
+    try {
+      const res = await sb("leads", {
         method: "POST",
         headers: { Prefer: "resolution=ignore-duplicates" },
         body: JSON.stringify({
@@ -402,12 +441,18 @@ async function recordUserTurn(
           phone: signals.phone,
           context_snippet: snippet,
           detected_by: "regex",
+          is_test: isTest,
         }),
       });
+      if (!res.ok) return fail("Saving the lead", new Error(await res.text()));
+    } catch (e) {
+      return fail("Saving the lead", e);
     }
+  }
 
-    if (actions.includes("scheduler") && signals.booking) {
-      await sb("meeting_requests", {
+  if (actions.includes("scheduler") && signals.booking) {
+    try {
+      const res = await sb("meeting_requests", {
         method: "POST",
         headers: { Prefer: "resolution=ignore-duplicates" },
         body: JSON.stringify({
@@ -416,12 +461,16 @@ async function recordUserTurn(
           email: signals.email,
           requested_for_text: content.slice(0, 200),
           context_snippet: snippet,
+          is_test: isTest,
         }),
       });
+      if (!res.ok) return fail("Saving the meeting request", new Error(await res.text()));
+    } catch (e) {
+      return fail("Saving the meeting request", e);
     }
-  } catch {
-    // Capture is best effort -- it must never break the conversation.
   }
+
+  return null;
 }
 
 function streamResponse(
@@ -429,6 +478,7 @@ function streamResponse(
   messages: ChatTurn[],
   sessionId: string | null,
   cors: Record<string, string>,
+  captureError: string | null,
 ): Response {
   const encoder = new TextEncoder();
   const controllerAbort = new AbortController();
@@ -444,6 +494,7 @@ function streamResponse(
           sessionId,
           providerId: cfg.providerId,
           modelId: cfg.modelId,
+          ...(captureError ? { captureError } : {}),
         });
         for await (const ev of streamLLM(cfg, messages, controllerAbort.signal)) {
           send(ev);

@@ -16,6 +16,7 @@ export type Lead = {
   contextSnippet: string;
   status: string;
   detectedBy: string;
+  isTest: boolean;
   createdAt: string;
 };
 
@@ -31,14 +32,15 @@ export type Meeting = {
   topic: string | null;
   contextSnippet: string;
   status: string;
+  isTest: boolean;
   createdAt: string;
 };
 
 export type ActionItems = { leads: Lead[]; meetings: Meeting[] };
 export type TranscriptMessage = { role: string; content: string; created_at: string };
 
-export function fetchActionItems(): Promise<ActionItems> {
-  return apiFetch<ActionItems>("/api/action-items");
+export function fetchActionItems(includeTest = false): Promise<ActionItems> {
+  return apiFetch<ActionItems>(`/api/action-items${includeTest ? "?includeTest=1" : ""}`);
 }
 
 export function fetchTranscript(sessionId: string): Promise<{ messages: TranscriptMessage[] }> {

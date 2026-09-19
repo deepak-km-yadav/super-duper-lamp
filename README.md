@@ -16,6 +16,7 @@ Run both files in `supabase/migrations/`, in order, in the Supabase SQL editor:
 1. `0001_botforge.sql` — tables, indexes and RLS. Safe to re-run, and it leaves
    the existing `lead_captures` table alone.
 2. `0002_grants.sql` — privileges for `service_role`.
+3. `0003_test_flag.sql` — marks captures made while testing in the editor.
 
 The second file is not optional. Enabling RLS and granting privileges are
 independent: the service role's `BYPASSRLS` lets it ignore policies, but it
@@ -96,6 +97,12 @@ runs hourly to catch sessions abandoned mid-reply.
 
 Everything captured appears at `/chatterbox/action-items`, with the
 conversation context, the full transcript, a status workflow and CSV export.
+
+Chatting in the editor's Live test panel captures like a real conversation, but
+the rows are marked `is_test` and hidden behind the "Show test captures"
+toggle, so you can confirm the feature works without your own experiments
+landing among real leads. If a capture fails, the reason is shown in the Test
+panel and logged to the function logs — it is never shown to a visitor.
 
 ## Development
 

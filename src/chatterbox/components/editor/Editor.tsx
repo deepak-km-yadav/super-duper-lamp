@@ -509,6 +509,47 @@ function IdentityPanel({
               </p>
             )}
           </div>
+          <div className="rounded-lg border border-border bg-bg/40 p-3">
+            <Label>On the shareable link</Label>
+            <p className="mt-0.5 text-[11px] text-muted">
+              These affect the bot's own link only. An iframe or the widget
+              always renders bare, because that page belongs to whoever
+              embedded it.
+            </p>
+            <label className="mt-2.5 flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={bot.showNav ?? false}
+                onChange={(e) => update("showNav", e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">
+                  Show site navigation
+                </span>
+                <span className="mt-0.5 block text-xs text-muted">
+                  Off by default, so a visitor sees the bot and not a way into
+                  your dashboard.
+                </span>
+              </span>
+            </label>
+            <label className="mt-2 flex cursor-pointer items-start gap-3">
+              <input
+                type="checkbox"
+                checked={bot.showBranding ?? false}
+                onChange={(e) => update("showBranding", e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">
+                  Show designinc.ai credit
+                </span>
+                <span className="mt-0.5 block text-xs text-muted">
+                  A quiet line beneath the message box.
+                </span>
+              </span>
+            </label>
+          </div>
           <div>
             <Label>Language</Label>
             <Input value={bot.language} onChange={(e) => update("language", e.target.value)} />

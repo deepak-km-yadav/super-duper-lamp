@@ -139,6 +139,23 @@ async function run() {
     const row = calls.find((c) => c.method === "POST" && c.url.startsWith("bots"))!.body as any;
     check("unknown columns dropped", row.is_admin === undefined && row.evil === undefined, row);
   }
+  {
+    // The editor's two chrome toggles have to survive the column whitelist.
+    calls.length = 0;
+    responder = (c) => {
+      if (c.method === "GET") return { body: [{ id: "b1", name: "N", slug: "n", published_at: null }] };
+      return { body: [{ id: "b1" }] };
+    };
+    const { res } = mkRes();
+    await botsHandler({
+      method: "PATCH", query: { id: "b1" },
+      headers: { "x-admin-token": "admin-secret-token" },
+      body: { showNav: true, showBranding: true },
+    }, res as any);
+    const patch = calls.find((c) => c.method === "PATCH")!.body as any;
+    check("showNav is writable as show_nav", patch.show_nav === true, patch);
+    check("showBranding is writable as show_branding", patch.show_branding === true, patch);
+  }
 
   console.log("\n-- slug freeze after publish --");
   {
@@ -204,6 +221,32 @@ async function run() {
     check("status stripped", b.status === undefined, b);
     check("requested columns are the redacted set",
       !calls[0].url.includes("system_prompt") && calls[0].url.includes("select="), calls[0].url);
+  }
+  {
+    // The visitor-facing page decides whether to draw site chrome, so it needs
+    // both flags — and nothing else new.
+    calls.length = 0;
+    responder = () => ({ body: [{
+      id: "b1", slug: "s", name: "N", status: "PUBLISHED",
+      show_nav: true, show_branding: true,
+    }] });
+    const { res, out } = mkRes();
+    await publicHandler({ method: "GET", query: { slug: "s" } }, res as any);
+    const b = out.payload.bot;
+    check("public bot carries showNav", b.showNav === true, b);
+    check("public bot carries showBranding", b.showBranding === true, b);
+    check("chrome flags are asked for by name",
+      calls[0].url.includes("show_nav") && calls[0].url.includes("show_branding"),
+      calls[0].url);
+    check("chrome flags do not drag the prompt along", b.systemPrompt === undefined, b);
+  }
+  {
+    // A bot saved before the migration reads as absent, not as "on".
+    responder = () => ({ body: [{ id: "b1", slug: "s", name: "N", status: "PUBLISHED" }] });
+    const { res, out } = mkRes();
+    await publicHandler({ method: "GET", query: { slug: "s" } }, res as any);
+    check("an old bot does not come back with the nav switched on",
+      out.payload.bot.showNav !== true, out.payload.bot);
   }
   {
     responder = () => ({ body: [{ id: "b1", slug: "s", name: "Paused Bot", status: "DRAFT" }] });

@@ -41,6 +41,11 @@ export type Bot = {
   notifyEmail?: string;
   notifyWebhookUrl?: string;
 
+  /** Show the site navigation bar above the bot's shareable link. */
+  showNav: boolean;
+  /** Show a designinc.ai credit line beneath the conversation. */
+  showBranding: boolean;
+
   visibility: BotVisibility;
   status: BotStatus;
   contentFilter: ContentFilterLevel;
@@ -78,6 +83,8 @@ export type PublicBot = Pick<
   | "tags"
   | "language"
   | "memory"
+  | "showNav"
+  | "showBranding"
 >;
 
 /** Notification targets for captured leads and meeting requests. */

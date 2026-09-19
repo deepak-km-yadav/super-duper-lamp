@@ -134,6 +134,20 @@ export function PublicChat({
         isStreaming={isStreaming}
         className={theme.inputBar}
       />
+
+      {bot.showBranding && (
+        <div className="px-3 pb-2 text-center text-[11px] opacity-50">
+          Built with{" "}
+          <a
+            href="https://designinc.ai"
+            target="_blank"
+            rel="noreferrer noopener"
+            className="underline underline-offset-2 hover:opacity-100"
+          >
+            designinc.ai
+          </a>
+        </div>
+      )}
     </div>
   );
 }

@@ -34,6 +34,8 @@ const MIGRATION_MARKERS: { table: string; column: string; migration: string }[] 
   { table: "bots", column: "agent_enabled", migration: "0001_botforge.sql" },
   { table: "meeting_requests", column: "is_test", migration: "0003_test_flag.sql" },
   { table: "chat_sessions", column: "summary", migration: "0004_conversation_summary.sql" },
+  { table: "bots", column: "notify_email", migration: "0005_notifications.sql" },
+  { table: "bots", column: "show_nav", migration: "0006_public_chrome.sql" },
 ];
 
 async function checkMigrations(): Promise<string[]> {

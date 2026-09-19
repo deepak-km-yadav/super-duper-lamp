@@ -11,7 +11,7 @@ BotForge setup below.
 
 ### 1. Database
 
-Run both files in `supabase/migrations/`, in order, in the Supabase SQL editor:
+Run every file in `supabase/migrations/`, in order, in the Supabase SQL editor:
 
 1. `0001_botforge.sql` — tables, indexes and RLS. Safe to re-run, and it leaves
    the existing `lead_captures` table alone.
@@ -20,6 +20,8 @@ Run both files in `supabase/migrations/`, in order, in the Supabase SQL editor:
 4. `0004_conversation_summary.sql` — rolling conversation summary and meeting
    summaries.
 5. `0005_notifications.sql` — per-bot notification targets.
+6. `0006_public_chrome.sql` — whether a published bot's link carries the site
+   navigation or a credit line. Both default to off.
 
 The second file is not optional. Enabling RLS and granting privileges are
 independent: the service role's `BYPASSRLS` lets it ignore policies, but it

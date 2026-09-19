@@ -4,9 +4,13 @@ import { ChatterboxApp } from '@/chatterbox/ChatterboxApp';
 
 const ChatterboxPage = () => {
   // An embedded bot is rendered inside someone else's page, so it must not
-  // carry this site's navigation with it.
-  const { search } = useLocation();
+  // carry this site's navigation with it. A published bot's own link is also
+  // independent by default: PublicBotPage puts the nav back itself when the
+  // owner has asked for it, because only it knows which bot is loading.
+  const { pathname, search } = useLocation();
   const embedded = new URLSearchParams(search).get('embed') === '1';
+  const isPublicChat = pathname.startsWith('/chatterbox/chat/');
+  const siteChrome = !embedded && !isPublicChat;
 
   return (
     <div className="h-screen flex flex-col bg-black text-white overflow-hidden">
@@ -24,7 +28,7 @@ const ChatterboxPage = () => {
       </div>
 
       <div className="relative z-10 flex flex-col h-full">
-        {!embedded && <NavBar />}
+        {siteChrome && <NavBar />}
 
         <div className="flex-1 overflow-auto">
           <ChatterboxApp />

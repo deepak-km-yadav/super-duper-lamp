@@ -1,6 +1,7 @@
 import * as React from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { Loader2 } from "lucide-react";
+import NavBar from "@/components/NavBar";
 import { PublicChat } from "../components/PublicChat";
 import { decodeBotFromShare } from "../lib/share-encode";
 import { getPublicBot } from "../lib/bot-store";
@@ -63,6 +64,14 @@ export function PublicBotPage() {
     };
   }, [slug]);
 
+  React.useEffect(() => {
+    const previous = document.title;
+    document.title = documentTitleFor(state) ?? previous;
+    return () => {
+      document.title = previous;
+    };
+  }, [state]);
+
   if (state.kind === "loading") {
     return (
       <main className="grid min-h-screen place-items-center text-sm text-muted">
@@ -116,26 +125,44 @@ export function PublicBotPage() {
             This bot doesn't exist, or it has been deleted. Check the link with
             whoever shared it.
           </p>
-          <Link
-            to="/chatterbox/dashboard"
-            className="mt-6 inline-flex h-10 items-center rounded-lg bg-accent px-4 text-sm font-medium text-accent-fg hover:opacity-90"
-          >
-            Go to dashboard
-          </Link>
         </div>
       </main>
     );
   }
 
   const embedded = new URLSearchParams(window.location.search).get("embed") === "1";
+  // The nav is the owner's choice and only ever on the bot's own link: inside
+  // an iframe or the widget the page belongs to whoever embedded it.
+  const showNav = !embedded && state.bot.showNav === true;
 
   return (
-    <div className="h-screen" style={{ height: "100dvh" }}>
-      {state.kind === "legacy" ? (
-        <PublicChat bot={state.bot} legacy embedded={embedded} />
-      ) : (
-        <PublicChat bot={state.bot} embedded={embedded} />
-      )}
+    <div className="flex flex-col" style={{ height: "100dvh" }}>
+      {showNav && <NavBar />}
+      <div className="min-h-0 flex-1">
+        {state.kind === "legacy" ? (
+          <PublicChat bot={state.bot} legacy embedded={embedded} />
+        ) : (
+          <PublicChat bot={state.bot} embedded={embedded} />
+        )}
+      </div>
     </div>
   );
+}
+
+/**
+ * A shared link should be identifiable in a visitor's tab strip, so the bot
+ * names its own page rather than inheriting the site title.
+ */
+function documentTitleFor(state: LoadState): string | null {
+  switch (state.kind) {
+    case "ready":
+    case "legacy":
+      return state.bot.name || "Chat";
+    case "paused":
+      return `${state.name} is paused`;
+    case "missing":
+      return "Bot not found";
+    default:
+      return null;
+  }
 }

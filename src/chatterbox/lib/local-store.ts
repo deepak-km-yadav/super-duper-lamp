@@ -32,6 +32,8 @@ export const LOCAL_DEFAULTS: Omit<Bot, "id" | "slug" | "createdAt" | "updatedAt"
   agentActions: [],
   notifyEmail: undefined,
   notifyWebhookUrl: undefined,
+  showNav: false,
+  showBranding: false,
   knowledge: [],
 };
 

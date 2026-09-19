@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.api.json",
-    "test:api": "esbuild scripts/api-smoke-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/api-smoke-test.mjs --log-level=error && node node_modules/.cache/api-smoke-test.mjs"
+    "test:api": "esbuild scripts/api-smoke-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/api-smoke-test.mjs --log-level=error && node node_modules/.cache/api-smoke-test.mjs",
+    "check:esm": "node scripts/check-esm.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

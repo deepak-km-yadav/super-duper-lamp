@@ -6,8 +6,8 @@
  * cannot be recovered through the dashboard once saved.
  */
 
-import { sbSelect, sbUpsert, sbDelete, SupabaseError } from "./_lib/supabase";
-import { isAdminToken, isAdminConfigured, ADMIN_HEADER } from "./_lib/auth";
+import { sbSelect, sbUpsert, sbDelete, SupabaseError } from "./_lib/supabase.js";
+import { isAdminToken, isAdminConfigured, ADMIN_HEADER } from "./_lib/auth.js";
 import {
   applyCors,
   header,
@@ -15,7 +15,7 @@ import {
   queryParam,
   type ApiRequest,
   type ApiResponse,
-} from "./_lib/http";
+} from "./_lib/http.js";
 
 function maskKey(key: string): string {
   if (!key) return "";

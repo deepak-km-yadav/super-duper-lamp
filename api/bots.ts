@@ -14,15 +14,15 @@ import {
   sbUpdate,
   sbDelete,
   SupabaseError,
-} from "./_lib/supabase";
-import { isAdminToken, isAdminConfigured, ADMIN_HEADER } from "./_lib/auth";
+} from "./_lib/supabase.js";
+import { isAdminToken, isAdminConfigured, ADMIN_HEADER } from "./_lib/auth.js";
 import {
   rowToBot,
   botToRow,
   randomId,
   slugify,
   type BotRow,
-} from "./_lib/bot";
+} from "./_lib/bot.js";
 import {
   applyCors,
   header,
@@ -30,7 +30,7 @@ import {
   queryParam,
   type ApiRequest,
   type ApiResponse,
-} from "./_lib/http";
+} from "./_lib/http.js";
 
 const BOT_COLUMNS = "*";
 

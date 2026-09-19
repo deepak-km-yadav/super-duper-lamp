@@ -3,8 +3,8 @@
  * Admin token required -- these rows hold real names, addresses and numbers.
  */
 
-import { sbSelect, sbSelectOne, sbUpdate, SupabaseError } from "./_lib/supabase";
-import { isAdminToken, isAdminConfigured, ADMIN_HEADER } from "./_lib/auth";
+import { sbSelect, sbSelectOne, sbUpdate, SupabaseError } from "./_lib/supabase.js";
+import { isAdminToken, isAdminConfigured, ADMIN_HEADER } from "./_lib/auth.js";
 import {
   applyCors,
   header,
@@ -12,7 +12,7 @@ import {
   queryParam,
   type ApiRequest,
   type ApiResponse,
-} from "./_lib/http";
+} from "./_lib/http.js";
 
 type LeadRow = {
   id: number;

@@ -85,7 +85,16 @@ npm run build      # production build
 npm run lint
 npm run typecheck  # type-checks api/, which vite build does not cover
 npm run test:api   # handler smoke tests against a stubbed PostgREST
+npm run check:esm  # every serverless function loads under Node ESM
 ```
+
+`check:esm` guards a failure that only appears in production. `package.json`
+sets `"type": "module"`, so Node rejects extensionless relative imports at
+runtime — but TypeScript and esbuild both resolve them, and `vite build` never
+looks at `api/`. An import written as `./_lib/supabase` therefore passes every
+other check and then returns FUNCTION_INVOCATION_FAILED once deployed. Relative
+imports inside `api/` must carry a `.js` extension, which TypeScript maps back
+to the `.ts` source.
 
 `npm run dev` starts Vite only and does **not** serve `/api`, so anything that
 touches the server (creating a bot, the dashboard, public chat) will fail

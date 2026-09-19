@@ -11,8 +11,8 @@
  * actually answers.
  */
 
-import { applyCors, header, type ApiRequest, type ApiResponse } from "./_lib/http";
-import { isAdminToken, isAdminConfigured, ADMIN_HEADER } from "./_lib/auth";
+import { applyCors, header, type ApiRequest, type ApiResponse } from "./_lib/http.js";
+import { isAdminToken, isAdminConfigured, ADMIN_HEADER } from "./_lib/auth.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";

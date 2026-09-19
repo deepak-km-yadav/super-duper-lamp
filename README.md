@@ -17,6 +17,8 @@ Run both files in `supabase/migrations/`, in order, in the Supabase SQL editor:
    the existing `lead_captures` table alone.
 2. `0002_grants.sql` — privileges for `service_role`.
 3. `0003_test_flag.sql` — marks captures made while testing in the editor.
+4. `0004_conversation_summary.sql` — rolling conversation summary and meeting
+   summaries.
 
 The second file is not optional. Enabling RLS and granting privileges are
 independent: the service role's `BYPASSRLS` lets it ignore policies, but it
@@ -67,6 +69,28 @@ Publish from the editor, then use the Share dialog:
 
 To restrict which sites may embed a bot, list them under Allowed domains in the
 bot's settings; `api/bot-chat.ts` enforces it against the request origin.
+
+## Conversation context and cost
+
+Each request sends the system prompt, a rolling summary of everything older,
+and only the last 8 turns — not the whole conversation. The summary is
+refreshed in `api/chat-turn.ts` after a reply has already streamed, so input
+tokens per turn stop growing once a chat runs long, and the visitor never waits
+on it.
+
+Token usage comes from what the providers report, stored on `chat_messages` and
+aggregated by `/api/usage`. OpenAI-compatible providers only return usage on a
+stream when `stream_options: { include_usage: true }` is sent, so that is
+always included; Anthropic reports it natively. Settings shows totals by bot
+and model, and each dashboard card shows its bot's 30-day figures.
+
+Background work — extraction and summarising — prefers `DETECTION_API_KEY` and
+otherwise falls back to the bot's own provider and stored key, so summaries
+work without configuring a second key.
+
+> `buildSystemPrompt` still inlines every knowledge document on every turn. For
+> a bot with substantial documents that will dominate the token bill; capping
+> or retrieving per-turn is the next thing to look at.
 
 ## Model parameters
 

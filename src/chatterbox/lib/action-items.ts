@@ -13,6 +13,7 @@ export type Lead = {
   company: string | null;
   intent: string | null;
   summary: string | null;
+  sessionSummary: string | null;
   contextSnippet: string;
   status: string;
   detectedBy: string;
@@ -30,6 +31,8 @@ export type Meeting = {
   requestedFor: string | null;
   timezone: string | null;
   topic: string | null;
+  summary: string | null;
+  sessionSummary: string | null;
   contextSnippet: string;
   status: string;
   isTest: boolean;

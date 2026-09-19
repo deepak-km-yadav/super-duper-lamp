@@ -343,6 +343,23 @@ function Transcript({ sessionId }: { sessionId: string }) {
   );
 }
 
+/**
+ * The one-line read. An item's own summary is written by the enrichment pass;
+ * until that lands, the session's rolling summary is better than nothing.
+ */
+function Summary({ text, fallback }: { text: string | null; fallback: string | null }) {
+  const body = text?.trim() || fallback?.trim();
+  if (!body) return null;
+  return (
+    <p className="mt-1.5 text-sm">
+      {body}
+      {!text?.trim() && (
+        <span className="ml-1.5 text-xs text-muted">(from the conversation so far)</span>
+      )}
+    </p>
+  );
+}
+
 function LeadCard({ lead, onChanged }: { lead: Lead; onChanged: () => void }) {
   const update = async (status: string) => {
     try {
@@ -381,7 +398,7 @@ function LeadCard({ lead, onChanged }: { lead: Lead; onChanged: () => void }) {
       snippet={lead.contextSnippet}
       sessionId={lead.sessionId}
     >
-      {lead.summary && <p className="mt-1.5 text-sm">{lead.summary}</p>}
+      <Summary text={lead.summary} fallback={lead.sessionSummary} />
     </Card>
   );
 }
@@ -422,7 +439,7 @@ function MeetingCard({ meeting, onChanged }: { meeting: Meeting; onChanged: () =
       snippet={meeting.contextSnippet}
       sessionId={meeting.sessionId}
     >
-      {meeting.topic && <p className="mt-1.5 text-sm">{meeting.topic}</p>}
+      <Summary text={meeting.summary ?? meeting.topic} fallback={meeting.sessionSummary} />
     </Card>
   );
 }

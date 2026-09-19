@@ -1,6 +1,5 @@
 import * as React from "react";
 import type { ChatMessage } from "./types";
-import { recordUsage } from "./usage-store";
 
 /**
  * Unsaved editor edits, sent so the Test panel can exercise a draft. Accepted
@@ -282,16 +281,6 @@ export function useChat(opts: UseChatOptions) {
 
         const latencyMs = Math.round(performance.now() - startedAt);
         setStats({ latencyMs, chars: acc.length, promptTokens, completionTokens });
-
-        if ((promptTokens || completionTokens) && current.botId) {
-          recordUsage({
-            botId: current.botId,
-            providerId: result.providerId ?? current.draft?.providerId ?? "unknown",
-            modelId: result.modelId ?? current.draft?.modelId ?? "unknown",
-            promptTokens: promptTokens ?? 0,
-            completionTokens: completionTokens ?? 0,
-          });
-        }
 
         // Persist the completed turn and enrich any captured lead out of band,
         // so none of it sits on the response path the visitor is waiting for.

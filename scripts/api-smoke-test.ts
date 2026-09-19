@@ -19,6 +19,7 @@ import { detectSignals, buildContextSnippet } from "../api/_lib/detect";
 import { readEnv, readEnvUrl, describeFetchFailure, hasRepeatedUrl } from "../api/_lib/env";
 import actionItemsHandler from "../api/action-items";
 import { captureTurn } from "./bot-chat-helper";
+import usageHandler from "../api/usage";
 import healthHandler from "../api/health";
 import { apiFetchForTest } from "./api-client-helper";
 import { toCsvForTest } from "./csv-helper";
@@ -438,6 +439,125 @@ async function run() {
     check("503 explains missing configuration", /missing configuration/.test(err), err);
   }
 
+  console.log("\n-- an empty reply is explained, never blank --");
+  {
+    // The reported symptom: a reasoning model spends its whole budget thinking
+    // and returns no text, which used to render as an empty bubble.
+    const lengthStop =
+      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "length" }] })}\n\n` +
+      "data: [DONE]\n\n";
+
+    const reasoning = await captureTurn({
+      admin: false, message: "hi", modelId: "gpt-5", frames: lengthStop,
+    });
+    check("no text produced", reasoning.streamed === "", reasoning.streamed);
+    check("an error event explains it", Boolean(reasoning.streamError), reasoning.streamError);
+    check("it names reasoning as the cause",
+      /reasoning/i.test(reasoning.streamError ?? ""), reasoning.streamError);
+    check("it says to raise Max tokens",
+      /Max tokens/i.test(reasoning.streamError ?? ""), reasoning.streamError);
+
+    const plain = await captureTurn({
+      admin: false, message: "hi", modelId: "gpt-4o", frames: lengthStop,
+    });
+    check("a plain model gets the plain explanation",
+      /Max tokens/i.test(plain.streamError ?? "") && !/reasoning/i.test(plain.streamError ?? ""),
+      plain.streamError);
+
+    const ok = await captureTurn({ admin: false, message: "hi", modelId: "gpt-4o" });
+    check("a normal reply reports no error", ok.streamError === undefined, ok.streamError);
+  }
+
+  console.log("\n-- reasoning models get token headroom --");
+  {
+    const reasoning = await captureTurn({
+      admin: false, message: "hi", modelId: "gpt-5", maxTokens: 100,
+    });
+    check("a tiny budget is raised to the floor",
+      reasoning.providerBody?.max_completion_tokens === 4096, reasoning.providerBody);
+
+    const big = await captureTurn({
+      admin: false, message: "hi", modelId: "gpt-5", maxTokens: 20000,
+    });
+    check("a larger budget is left alone",
+      big.providerBody?.max_completion_tokens === 20000, big.providerBody);
+
+    const plain = await captureTurn({
+      admin: false, message: "hi", modelId: "gpt-4o", maxTokens: 100,
+    });
+    check("a plain model keeps its configured budget",
+      plain.providerBody?.max_tokens === 100, plain.providerBody);
+  }
+
+  console.log("\n-- usage is actually requested --");
+  {
+    const openai = await captureTurn({ admin: false, message: "hi", modelId: "gpt-4o" });
+    check("stream_options.include_usage is sent to OpenAI-compatible providers",
+      (openai.providerBody?.stream_options as { include_usage?: boolean })?.include_usage === true,
+      openai.providerBody);
+
+    const anthropic = await captureTurn({
+      admin: false, message: "hi", providerId: "anthropic", modelId: "claude-sonnet-5",
+    });
+    check("and not to Anthropic, which reports usage natively",
+      anthropic.providerBody?.stream_options === undefined, anthropic.providerBody);
+  }
+
+  console.log("\n-- only the live window is sent --");
+  {
+    const history = Array.from({ length: 30 }, (_, i) => ({
+      role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+      content: `turn ${i}`,
+    }));
+    const r = await captureTurn({ admin: false, message: "latest", history, modelId: "gpt-4o" });
+    const sent = (r.providerBody?.messages ?? []) as { role: string; content: string }[];
+    const conversation = sent.filter((m) => m.role !== "system");
+
+    check("the live window is capped at 8 turns", conversation.length === 8, conversation.length);
+    check("the newest turn is included",
+      conversation[conversation.length - 1]?.content === "latest", conversation.slice(-1));
+    check("the oldest turns are dropped",
+      !conversation.some((m) => m.content === "turn 0"), conversation.slice(0, 2));
+    check("the whole history is not resent", conversation.length < history.length, conversation.length);
+  }
+
+  console.log("\n-- usage endpoint --");
+  {
+    const { res, out } = mkRes();
+    await usageHandler({ method: "GET", headers: {} }, res as any);
+    check("usage requires a token", out.code === 401, out.payload);
+  }
+  {
+    responder = (c) =>
+      c.url.startsWith("bots")
+        ? { body: [{ id: "b1", name: "My Bot" }] }
+        : { body: [
+            { bot_id: "b1", provider_id: "openai", model_id: "gpt-4o",
+              prompt_tokens: 100, completion_tokens: 20, created_at: "2026-09-18T10:00:00Z" },
+            { bot_id: "b1", provider_id: "openai", model_id: "gpt-4o",
+              prompt_tokens: 50, completion_tokens: 10, created_at: "2026-09-18T11:00:00Z" },
+            { bot_id: "b1", provider_id: "openai", model_id: "gpt-4o",
+              prompt_tokens: null, completion_tokens: null, created_at: "2026-09-17T11:00:00Z" },
+          ] };
+    const { res, out } = mkRes();
+    await usageHandler(
+      { method: "GET", headers: { "x-admin-token": "admin-secret-token" } },
+      res as any,
+    );
+    check("input tokens are summed", out.payload.totals.promptTokens === 150, out.payload.totals);
+    check("output tokens are summed", out.payload.totals.completionTokens === 30, out.payload.totals);
+    check("rows without usage are counted separately",
+      out.payload.totals.messages === 3 && out.payload.totals.messagesWithUsage === 2,
+      out.payload.totals);
+    check("grouped by bot with its name",
+      out.payload.byBot[0].botName === "My Bot" && out.payload.byBot[0].promptTokens === 150,
+      out.payload.byBot);
+    check("grouped by model",
+      out.payload.byModel[0].modelId === "gpt-4o", out.payload.byModel);
+    check("grouped by day", out.payload.byDay.length === 2, out.payload.byDay);
+    responder = () => ({ body: [] });
+  }
+
   console.log("\n-- editor tests are captured, and flagged --");
   {
     // The regression: an admin request used to create no session at all, so
@@ -508,8 +628,9 @@ async function run() {
         { status: 200, body: sseChunk("hi") },
       ]);
       const b = sent[0].body;
+      // 512 is below the reasoning floor, so it is raised to 4096 on purpose.
       check(`openai/${model} sends max_completion_tokens`,
-        b.max_completion_tokens === 512 && b.max_tokens === undefined, b);
+        b.max_completion_tokens === 4096 && b.max_tokens === undefined, b);
       check(`openai/${model} omits temperature and top_p`,
         b.temperature === undefined && b.top_p === undefined, b);
     }

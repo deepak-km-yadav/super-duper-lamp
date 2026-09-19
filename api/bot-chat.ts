@@ -15,6 +15,7 @@
 import {
   streamLLM,
   buildSystemPrompt,
+  capabilitiesFor,
   knownProvider,
   ProviderError,
   type ChatTurn,
@@ -31,8 +32,20 @@ const SUPABASE_URL = readEnvUrl(process.env.SUPABASE_URL);
 const SERVICE_KEY = readEnv(process.env.SUPABASE_SERVICE_ROLE_KEY);
 const IP_SALT = readEnv(process.env.VISITOR_IP_SALT) || "botforge";
 
-const MAX_MESSAGES = 60;
 const MAX_CHARS = 8000;
+
+/**
+ * How many recent turns go to the model verbatim.
+ *
+ * Everything older is represented by the session's rolling summary, refreshed
+ * in api/chat-turn.ts after a reply has already streamed. Previously the whole
+ * conversation was resent every turn, so input tokens -- and cost, and
+ * latency -- grew without limit as a chat went on.
+ */
+const LIVE_TURNS = 8;
+
+/** Only used as a sanity bound on what a client may post. */
+const MAX_MESSAGES = 60;
 
 type BotRow = {
   id: string;
@@ -224,15 +237,31 @@ export default async function handler(req: Request): Promise<Response> {
     }
   }
 
+  // Resolved before the prompt is built, because the prompt carries the
+  // session's rolling summary of everything older than the live window.
+  //
+  // Admin requests get a session too, flagged as tests. They used to be
+  // skipped entirely, which meant the editor's Live test panel -- the obvious
+  // place to check that Lead Magnet works -- captured nothing and said nothing.
+  const isTest = isAdmin;
+  const session = await ensureSession(bot.id, body.sessionId, req, ipHash, isTest);
+  const sessionId = session?.id ?? null;
+
   const knowledge = await loadKnowledge(bot.id);
   const systemPrompt = buildSystemPrompt(
-    agentInstructions(
-      String(draft?.systemPrompt ?? bot.system_prompt),
-      bot.agent_enabled,
-      bot.agent_actions,
+    withSummary(
+      agentInstructions(
+        String(draft?.systemPrompt ?? bot.system_prompt),
+        bot.agent_enabled,
+        bot.agent_actions,
+      ),
+      session?.summary ?? null,
     ),
     knowledge,
   );
+
+  // Only the tail goes verbatim; the rest is covered by the summary above.
+  const context = messages.slice(-LIVE_TURNS);
 
   const cfg: ProviderConfig = {
     providerId,
@@ -244,14 +273,8 @@ export default async function handler(req: Request): Promise<Response> {
     topP: draft?.topP ?? bot.top_p,
   };
 
-  // Session + the visitor's turn are recorded before streaming, so a lead
-  // survives even if the visitor closes the tab mid-reply.
-  //
-  // Admin requests are recorded too, flagged as tests. They used to be skipped
-  // entirely, which meant the editor's Live test panel -- the obvious place to
-  // check that Lead Magnet works -- captured nothing and said nothing.
-  const isTest = isAdmin;
-  const sessionId = await ensureSession(bot.id, body.sessionId, req, ipHash, isTest);
+  // The visitor's turn is recorded before streaming, so a captured lead
+  // survives even if they close the tab mid-reply.
   const lastUser = [...messages].reverse().find((m) => m.role === "user");
   const signals = lastUser ? detectSignals(lastUser.content) : null;
 
@@ -268,7 +291,7 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   // Only the person testing sees why a capture failed; visitors never do.
-  return streamResponse(cfg, messages, sessionId, cors, isTest ? captureError : null);
+  return streamResponse(cfg, context, sessionId, cors, isTest ? captureError : null);
 }
 
 function sanitizeMessages(input: unknown): ChatTurn[] {
@@ -283,6 +306,16 @@ function sanitizeMessages(input: unknown): ChatTurn[] {
     .map((m) => ({ role: m.role, content: m.content.slice(0, MAX_CHARS) }))
     .filter((m) => m.content.trim().length > 0)
     .slice(-MAX_MESSAGES);
+}
+
+/** Puts the rolling summary of older turns in front of the live window. */
+function withSummary(systemPrompt: string, summary: string | null): string {
+  if (!summary?.trim()) return systemPrompt;
+  return (
+    `${systemPrompt}\n\n<conversation_so_far>\n${summary.trim()}\n</conversation_so_far>\n` +
+    "The messages that follow are the most recent turns; anything earlier is " +
+    "summarised above. Treat the summary as things the visitor has already told you."
+  );
 }
 
 /**
@@ -343,21 +376,25 @@ async function overDailyCap(botId: string, cap: number): Promise<boolean> {
   }
 }
 
+type SessionInfo = { id: string; summary: string | null };
+
 async function ensureSession(
   botId: string,
   sessionId: string | undefined,
   req: Request,
   ipHash: string,
   isTest: boolean,
-): Promise<string | null> {
+): Promise<SessionInfo | null> {
   try {
     if (sessionId) {
-      const rows = await sbJson<{ id: string; is_test: boolean }[]>(
-        `chat_sessions?select=id,is_test&id=eq.${sessionId}&bot_id=eq.${botId}&limit=1`,
+      const rows = await sbJson<{ id: string; is_test: boolean; summary: string | null }[]>(
+        `chat_sessions?select=id,is_test,summary&id=eq.${sessionId}&bot_id=eq.${botId}&limit=1`,
       );
       // A session id from the other mode must not be reused, or an editor test
       // would continue a visitor's conversation, or vice versa.
-      if (rows?.[0] && rows[0].is_test === isTest) return rows[0].id;
+      if (rows?.[0] && rows[0].is_test === isTest) {
+        return { id: rows[0].id, summary: rows[0].summary };
+      }
     }
     const created = await sbJson<{ id: string }[]>("chat_sessions", {
       method: "POST",
@@ -371,7 +408,8 @@ async function ensureSession(
         origin: (req.headers.get("origin") || "").slice(0, 200),
       }),
     });
-    return created?.[0]?.id ?? null;
+    const id = created?.[0]?.id;
+    return id ? { id, summary: null } : null;
   } catch {
     return null; // chat still works even if transcripts cannot be written
   }
@@ -473,6 +511,30 @@ async function recordUserTurn(
   return null;
 }
 
+/**
+ * Why a model returned no visible text.
+ *
+ * The common case by far is a reasoning model whose entire token budget went
+ * on thinking: that counts against max_completion_tokens, so a small Max
+ * tokens produces a truncated, empty completion rather than an error.
+ */
+function emptyReplyReason(cfg: ProviderConfig, stopReason: string): string {
+  const reasoning = !capabilitiesFor(cfg.providerId, cfg.modelId).sampling;
+
+  if (stopReason === "length" || stopReason === "max_tokens") {
+    return reasoning
+      ? `${cfg.modelId} used its whole token budget on reasoning and had none left for a reply. ` +
+          "Raise Max tokens in the bot's Advanced sampling settings — reasoning models need " +
+          "considerably more than a plain chat model."
+      : `${cfg.modelId} hit the Max tokens limit before writing anything. Raise Max tokens in ` +
+          "the bot's Advanced sampling settings.";
+  }
+  if (stopReason === "content_filter") {
+    return `${cfg.modelId} declined to answer that message.`;
+  }
+  return `${cfg.modelId} returned an empty reply${stopReason ? ` (stop reason: ${stopReason})` : ""}.`;
+}
+
 function streamResponse(
   cfg: ProviderConfig,
   messages: ChatTurn[],
@@ -496,8 +558,19 @@ function streamResponse(
           modelId: cfg.modelId,
           ...(captureError ? { captureError } : {}),
         });
+
+        let produced = 0;
+        let stopReason = "";
         for await (const ev of streamLLM(cfg, messages, controllerAbort.signal)) {
+          if (ev.t === "delta") produced += ev.v.length;
+          if (ev.t === "stop") stopReason = ev.reason;
           send(ev);
+        }
+
+        // A completion that yields nothing used to render as an empty bubble
+        // with no explanation. Say what happened instead.
+        if (produced === 0) {
+          send({ t: "error", message: emptyReplyReason(cfg, stopReason) });
         }
       } catch (e) {
         const message =

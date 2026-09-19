@@ -15,12 +15,36 @@ export function readEnv(raw: string | undefined): string {
 }
 
 /**
- * Normalises a base URL: drops trailing slashes, and drops a `/rest/v1`
- * suffix, which is easy to include by mistake because it is what the REST
- * examples in the Supabase docs show.
+ * Keeps only the first URL when a value contains several.
+ *
+ * Pasting into a dashboard field that already holds a value appends rather than
+ * replaces, so `https://x.supabase.cohttps://x.supabase.co` is a common result.
+ * It parses without error -- the host just becomes `x.supabase.cohttps` -- so
+ * the only symptom is a DNS failure for a hostname nobody typed.
+ */
+export function firstUrl(value: string): string {
+  const scheme = /https?:\/\//gi;
+  const starts: number[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = scheme.exec(value)) !== null) starts.push(match.index);
+  if (starts.length < 2) return value;
+  return value.slice(0, starts[1]);
+}
+
+/** True when a value looks like more than one URL run together. */
+export function hasRepeatedUrl(raw: string | undefined): boolean {
+  const v = readEnv(raw);
+  return firstUrl(v).trim() !== v.trim();
+}
+
+/**
+ * Normalises a base URL: keeps only the first URL, then drops trailing slashes
+ * and a `/rest/v1` suffix, which is easy to include by mistake because it is
+ * what the REST examples in the Supabase docs show.
  */
 export function readEnvUrl(raw: string | undefined): string {
-  return readEnv(raw)
+  return firstUrl(readEnv(raw))
+    .trim()
     .replace(/\/+$/, "")
     .replace(/\/rest\/v1$/, "")
     .replace(/\/+$/, "");
@@ -40,6 +64,14 @@ export function describeFetchFailure(error: unknown, url: string): string {
     );
   }
   if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
+    // A hostname with a scheme buried in it is a value pasted twice, not a typo.
+    if (/https?$/i.test(host) || /https?/i.test(host.replace(/^https?:\/\//, ""))) {
+      return (
+        `Could not resolve "${host}", which looks like two URLs run together — ` +
+        "SUPABASE_URL was probably pasted on top of an existing value. Set it to " +
+        "just the project URL, e.g. https://your-project.supabase.co, and redeploy."
+      );
+    }
     return (
       `Could not resolve ${host || "the Supabase host"}. Check SUPABASE_URL for a ` +
       "typo, and check in the Supabase dashboard that the project still exists " +

@@ -12,7 +12,7 @@
  */
 
 import { applyCors, header, type ApiRequest, type ApiResponse } from "./_lib/http.js";
-import { readEnv, readEnvUrl, describeFetchFailure } from "./_lib/env.js";
+import { readEnv, readEnvUrl, describeFetchFailure, hasRepeatedUrl } from "./_lib/env.js";
 import {
   isAdminToken,
   isAdminConfigured,
@@ -37,12 +37,17 @@ async function checkTable(table: string): Promise<TableCheck> {
     if (res.ok) return { ok: true, detail: "reachable" };
 
     const body = await res.text();
-    if (res.status === 401 || res.status === 403) {
+
+    // Inspect the body before the status: PostgREST returns 401/403 for a
+    // privilege error too, so branching on status alone misreports 42501 as a
+    // bad key.
+    if (/42501|permission denied/i.test(body)) {
       return {
         ok: false,
         detail:
-          "Supabase rejected the key. Check that SUPABASE_SERVICE_ROLE_KEY is the " +
-          "service_role (secret) key, not the anon/publishable one.",
+          `The service role has no privileges on "${table}". Run ` +
+          "supabase/migrations/0002_grants.sql in the Supabase SQL editor. " +
+          "Enabling RLS and granting privileges are separate things.",
       };
     }
     if (/does not exist|PGRST205|PGRST202/i.test(body)) {
@@ -51,6 +56,14 @@ async function checkTable(table: string): Promise<TableCheck> {
         detail:
           `Table "${table}" is missing. Run supabase/migrations/0001_botforge.sql ` +
           "in the Supabase SQL editor.",
+      };
+    }
+    if (res.status === 401 || res.status === 403) {
+      return {
+        ok: false,
+        detail:
+          "Supabase rejected the key. Check that SUPABASE_SERVICE_ROLE_KEY is the " +
+          "service_role (secret) key, not the anon/publishable one.",
       };
     }
     return { ok: false, detail: `Supabase returned ${res.status}: ${body.slice(0, 200)}` };
@@ -138,6 +151,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   }
   if (/\/rest\/v1\/?$/.test(rawUrl.trim())) {
     warnings.push("SUPABASE_URL includes /rest/v1 (corrected automatically).");
+  }
+  if (hasRepeatedUrl(rawUrl)) {
+    warnings.push(
+      "SUPABASE_URL contained more than one URL — it was probably pasted on top " +
+        "of an existing value. Only the first was used; fix the variable.",
+    );
   }
   if (SUPABASE_URL && !/^https?:\/\//i.test(SUPABASE_URL)) {
     warnings.push("SUPABASE_URL is missing the https:// prefix — this will fail.");

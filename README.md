@@ -11,8 +11,17 @@ BotForge setup below.
 
 ### 1. Database
 
-Run `supabase/migrations/0001_botforge.sql` in the Supabase SQL editor. It is
-safe to re-run, and it leaves the existing `lead_captures` table alone.
+Run both files in `supabase/migrations/`, in order, in the Supabase SQL editor:
+
+1. `0001_botforge.sql` — tables, indexes and RLS. Safe to re-run, and it leaves
+   the existing `lead_captures` table alone.
+2. `0002_grants.sql` — privileges for `service_role`.
+
+The second file is not optional. Enabling RLS and granting privileges are
+independent: the service role's `BYPASSRLS` lets it ignore policies, but it
+still needs a table grant to read the table at all. Without it every request
+fails with `42501 permission denied for table bots`. Supabase's default
+privileges cover this on some projects but not all, so the grants are explicit.
 
 Row level security is enabled on every table with no policies. There is no
 Supabase Auth here, so RLS is a blast shield rather than an authorization
@@ -126,10 +135,16 @@ reach Supabase at all. `/api/health` reports the specific reason — most often
 `SUPABASE_URL` has a typo, or the Supabase project is paused (free projects
 pause after a period of inactivity and must be resumed from the dashboard).
 
-Leading and trailing whitespace, wrapping quotes, a trailing slash and a
-`/rest/v1` suffix on `SUPABASE_URL` are all corrected automatically and
-reported under `warnings`. A missing `https://` prefix is not recoverable and
-is reported as an error.
+Leading and trailing whitespace, wrapping quotes, a trailing slash, a
+`/rest/v1` suffix, and a value accidentally pasted twice are all corrected
+automatically on `SUPABASE_URL` and reported under `warnings`. A missing
+`https://` prefix is not recoverable and is reported as an error.
+
+A doubled value is worth knowing about: pasting into a field that already holds
+a value appends rather than replaces, producing
+`https://x.supabase.cohttps://x.supabase.co`. That parses without complaint —
+the host simply becomes `x.supabase.cohttps` — so the only symptom is a DNS
+failure for a hostname nobody typed.
 
 `LEADS_DASHBOARD_TOKEN` grants access to the legacy `/leads` page only. It used
 to double as a BotForge admin token, which meant the old leads password could

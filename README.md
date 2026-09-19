@@ -67,6 +67,20 @@ Publish from the editor, then use the Share dialog:
 To restrict which sites may embed a bot, list them under Allowed domains in the
 bot's settings; `api/bot-chat.ts` enforces it against the request origin.
 
+## Model parameters
+
+OpenAI's reasoning families (`gpt-5*`, `o1`/`o3`/`o4`…) take
+`max_completion_tokens` rather than `max_tokens`, and accept only the default
+`temperature` and `top_p`. `capabilitiesFor()` in `api/_lib/llm-stream.ts`
+picks the right shape per provider and model, and the editor greys out the
+sampling controls for models that ignore them.
+
+That table cannot stay ahead of every provider, so a 400 naming an unsupported
+parameter is repaired from the provider's own message and retried once — which
+is what keeps the next model family from reproducing the same failure. The
+retry happens before any bytes are streamed, and a 400 that names no parameter
+is passed through untouched rather than retried.
+
 ## Agent actions
 
 Turn on **Act as an Agent** in a bot's settings and enable either action:

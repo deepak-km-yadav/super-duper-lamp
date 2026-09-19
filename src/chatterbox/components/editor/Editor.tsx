@@ -502,6 +502,12 @@ function IdentityPanel({
               <option value="unlisted">Unlisted — link only</option>
               <option value="private">Private — only you</option>
             </Select>
+            {bot.visibility === "private" && (
+              <p className="mt-1 text-[11px] text-muted">
+                The public link and any embed stop working. Only the Live test
+                panel can reach it.
+              </p>
+            )}
           </div>
           <div>
             <Label>Language</Label>
@@ -636,8 +642,14 @@ function PromptPanel({
             <Select value={bot.memory} onChange={(e) => update("memory", e.target.value as Bot["memory"])}>
               <option value="none">None — every message is fresh</option>
               <option value="session">Session — until tab closes</option>
-              <option value="persistent">Persistent (coming soon)</option>
+              <option value="persistent">Persistent — remembers on return</option>
             </Select>
+            {bot.memory === "none" && (
+              <p className="mt-1 text-[11px] text-muted">
+                No history is sent, so the bot cannot follow up on anything said
+                earlier.
+              </p>
+            )}
           </div>
           <div>
             <Label>Content filter</Label>
@@ -646,6 +658,10 @@ function PromptPanel({
               <option value="moderate">Moderate</option>
               <option value="off">Off</option>
             </Select>
+            <p className="mt-1 text-[11px] text-muted">
+              A safety instruction added to the prompt, not a separate
+              classifier — a determined visitor may still get around it.
+            </p>
           </div>
           <div>
             <Label>Language</Label>
@@ -737,6 +753,40 @@ function AgentPanel({
               </span>
             </label>
           ))}
+
+          {actions.length > 0 && (
+            <div className="mt-3 space-y-2 border-t border-border pt-3">
+              <p className="text-xs font-medium text-muted">
+                Tell me when something is captured
+              </p>
+              <div>
+                <Label htmlFor="notify-email">Email</Label>
+                <Input
+                  id="notify-email"
+                  type="email"
+                  value={bot.notifyEmail ?? ""}
+                  onChange={(e) => update("notifyEmail", e.target.value)}
+                  placeholder="you@company.com"
+                  autoComplete="off"
+                />
+              </div>
+              <div>
+                <Label htmlFor="notify-webhook">Webhook URL</Label>
+                <Input
+                  id="notify-webhook"
+                  type="url"
+                  value={bot.notifyWebhookUrl ?? ""}
+                  onChange={(e) => update("notifyWebhookUrl", e.target.value)}
+                  placeholder="https://hooks.zapier.com/…"
+                  autoComplete="off"
+                />
+                <p className="mt-1 text-[11px] text-muted">
+                  Posts the capture as JSON — works with Zapier, Make, n8n or a
+                  Slack incoming webhook. Test captures never notify.
+                </p>
+              </div>
+            </div>
+          )}
 
           {actions.length === 0 ? (
             <p className="rounded-md border border-yellow-500/30 bg-yellow-500/5 px-2 py-1.5 text-xs text-yellow-600">

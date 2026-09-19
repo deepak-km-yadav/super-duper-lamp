@@ -11,6 +11,12 @@ import { sbSelect, sbSelectOne, sbInsert, sbUpdate, SupabaseError } from "./_lib
 import { applyCors, jsonBody, type ApiRequest, type ApiResponse } from "./_lib/http.js";
 import { buildContextSnippet } from "./_lib/detect.js";
 import {
+  notifyCapture,
+  shouldNotify,
+  type CaptureNotification,
+  type NotifyTargets,
+} from "./_lib/notify.js";
+import {
   extractLead,
   extractMeeting,
   buildTranscript,
@@ -22,10 +28,13 @@ import {
 type SessionRow = { id: string; bot_id: string; analyzed_at: string | null; is_test: boolean };
 type BotRow = {
   id: string;
+  name: string;
   agent_enabled: boolean;
   agent_actions: string[];
   provider_id: string;
   model_id: string;
+  notify_email: string | null;
+  notify_webhook_url: string | null;
 };
 type MessageRow = { id: number; role: string; content: string };
 
@@ -89,7 +98,7 @@ export async function analyzeSession(
 ): Promise<void> {
   const bot = await sbSelectOne<BotRow>(
     "bots",
-    `select=id,agent_enabled,agent_actions,provider_id,model_id&id=eq.${botId}`,
+    `select=id,name,agent_enabled,agent_actions,provider_id,model_id,notify_email,notify_webhook_url&id=eq.${botId}`,
   );
   if (!bot) return;
 
@@ -127,6 +136,82 @@ export async function analyzeSession(
   if (actions.includes("scheduler")) {
     await enrichMeeting(model, sessionId, botId, transcript, snippet, isTest);
   }
+
+  // After enrichment, so the message carries a name and a summary rather than
+  // a bare email address.
+  await notifyPending(bot, isTest);
+}
+
+/**
+ * Announces captures for this bot that have not been announced yet.
+ *
+ * Reached from both the post-reply pass and the hourly sweeper, so notified_at
+ * is what guarantees exactly one notification per capture.
+ */
+export async function notifyPending(bot: BotRow, isTest: boolean): Promise<void> {
+  const targets: NotifyTargets = {
+    email: bot.notify_email?.trim() || null,
+    webhookUrl: bot.notify_webhook_url?.trim() || null,
+  };
+  if (!targets.email && !targets.webhookUrl) return;
+
+  try {
+    const [leads, meetings] = await Promise.all([
+      sbSelect<Record<string, unknown>>(
+        "leads",
+        `select=*&bot_id=eq.${bot.id}&notified_at=is.null&order=created_at.asc&limit=20`,
+      ),
+      sbSelect<Record<string, unknown>>(
+        "meeting_requests",
+        `select=*&bot_id=eq.${bot.id}&notified_at=is.null&order=created_at.asc&limit=20`,
+      ),
+    ]);
+
+    for (const row of leads) await announce("lead", row, bot, targets, isTest);
+    for (const row of meetings) await announce("meeting", row, bot, targets, isTest);
+  } catch {
+    // The capture itself is already saved; the sweeper retries the notice.
+  }
+}
+
+async function announce(
+  kind: "lead" | "meeting",
+  row: Record<string, unknown>,
+  bot: BotRow,
+  targets: NotifyTargets,
+  isTestFallback: boolean,
+): Promise<void> {
+  const table = kind === "lead" ? "leads" : "meeting_requests";
+  const isTest = Boolean(row.is_test ?? isTestFallback);
+
+  const notification: CaptureNotification = {
+    kind,
+    botId: bot.id,
+    botName: bot.name,
+    name: (row.name as string) ?? null,
+    email: (row.email as string) ?? null,
+    phone: (row.phone as string) ?? null,
+    requestedFor: kind === "meeting" ? ((row.requested_for_text as string) ?? null) : undefined,
+    summary: (row.summary as string) ?? null,
+    contextSnippet: (row.context_snippet as string) ?? "",
+    sessionId: (row.session_id as string) ?? null,
+    capturedAt: (row.created_at as string) ?? new Date().toISOString(),
+  };
+
+  // A test capture, or one with no way to reach the person, is marked as
+  // handled so it is not reconsidered on every sweep.
+  if (!shouldNotify(notification, isTest)) {
+    await sbUpdate(table, `id=eq.${row.id}`, { notified_at: new Date().toISOString() });
+    return;
+  }
+
+  const result = await notifyCapture(notification, targets);
+  if (result.errors.length > 0) {
+    console.error(`[notify] ${kind} ${row.id}: ${result.errors.join("; ")}`);
+  }
+  // Marked even on failure: a retry loop that mails on every sweep would be
+  // worse than a missed notice, and the row is still in Action Items.
+  await sbUpdate(table, `id=eq.${row.id}`, { notified_at: new Date().toISOString() });
 }
 
 /** The bot's own provider and stored key, for use when no dedicated key is set. */

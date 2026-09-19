@@ -20,6 +20,11 @@ type Options = {
   maxTokens?: number;
   /** Stream frames to send instead of a normal reply. */
   frames?: string;
+  visibility?: string;
+  contentFilter?: string;
+  memory?: string;
+  /** A stored rolling summary, to check whether it is attached. */
+  summary?: string;
 };
 
 export type CaptureResult = {
@@ -33,6 +38,10 @@ export type CaptureResult = {
   streamError?: string;
   /** The body sent to the provider. */
   providerBody?: Record<string, unknown>;
+  /** HTTP status of the handler's response. */
+  status: number;
+  /** The system prompt the model received. */
+  systemPrompt: string;
 };
 
 export async function captureTurn(opts: Options): Promise<CaptureResult> {
@@ -89,7 +98,11 @@ export async function captureTurn(opts: Options): Promise<CaptureResult> {
           model_id: opts.modelId ?? "gpt-4o",
           temperature: 0.7,
           max_tokens: opts.maxTokens ?? 100,
-          top_p: 1, allowed_domains: [], agent_enabled: true,
+          top_p: 1, allowed_domains: [],
+          visibility: opts.visibility ?? "public",
+          content_filter: opts.contentFilter ?? "off",
+          memory: opts.memory ?? "session",
+          agent_enabled: true,
           agent_actions: opts.agentActions ?? ["lead_magnet", "scheduler"],
           daily_message_cap: 0,
         },
@@ -99,6 +112,7 @@ export async function captureTurn(opts: Options): Promise<CaptureResult> {
     if (path.startsWith("knowledge_docs")) return json([]);
     if (path.startsWith("chat_sessions")) {
       if (method === "POST") return json([{ id: "sess-1" }]);
+      if (opts.summary) return json([{ id: "sess-1", is_test: opts.admin, summary: opts.summary }]);
       return json([]);
     }
     if (path.startsWith("leads") && method === "POST" && opts.failLeads) {
@@ -110,6 +124,7 @@ export async function captureTurn(opts: Options): Promise<CaptureResult> {
   let streamed = "";
   let captureError: string | undefined;
   let streamError: string | undefined;
+  let status = 0;
   try {
     const res = await handler(
       new Request("https://app.test/api/bot-chat", {
@@ -120,10 +135,12 @@ export async function captureTurn(opts: Options): Promise<CaptureResult> {
         },
         body: JSON.stringify({
           slug: "s",
+          sessionId: opts.summary ? "sess-1" : undefined,
           messages: [...(opts.history ?? []), { role: "user", content: opts.message }],
         }),
       }),
     );
+    status = res.status;
     const text = await res.text();
     for (const line of text.split("\n")) {
       if (!line.startsWith("data: ")) continue;
@@ -150,5 +167,11 @@ export async function captureTurn(opts: Options): Promise<CaptureResult> {
     streamed,
     streamError,
     providerBody,
+    status,
+    systemPrompt: String(
+      ((providerBody?.messages as { role: string; content: string }[] | undefined) ?? []).find(
+        (m) => m.role === "system",
+      )?.content ?? "",
+    ),
   };
 }

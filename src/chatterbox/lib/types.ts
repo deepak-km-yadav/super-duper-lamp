@@ -38,6 +38,8 @@ export type Bot = {
 
   agentEnabled: boolean;
   agentActions: AgentAction[];
+  notifyEmail?: string;
+  notifyWebhookUrl?: string;
 
   visibility: BotVisibility;
   status: BotStatus;
@@ -75,7 +77,14 @@ export type PublicBot = Pick<
   | "chatTheme"
   | "tags"
   | "language"
+  | "memory"
 >;
+
+/** Notification targets for captured leads and meeting requests. */
+export type BotNotifications = {
+  notifyEmail?: string;
+  notifyWebhookUrl?: string;
+};
 
 export type KnowledgeDoc = {
   id: string;

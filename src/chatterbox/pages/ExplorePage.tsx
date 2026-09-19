@@ -10,7 +10,10 @@ import type { Bot } from "../lib/types";
 export function ExplorePage() {
   const state = useBots();
   const published = React.useMemo(
-    () => (state.status === "ready" ? state.data.filter((b) => b.status === "PUBLISHED") : []),
+    () =>
+      state.status === "ready"
+        ? state.data.filter((b) => b.status === "PUBLISHED" && b.visibility === "public")
+        : [],
     [state],
   );
 
@@ -22,7 +25,7 @@ export function ExplorePage() {
           <Compass size={20} className="text-accent" />
           <div>
             <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Explore</h1>
-            <p className="text-sm text-muted">Your published bots</p>
+            <p className="text-sm text-muted">Your public published bots</p>
           </div>
         </div>
 

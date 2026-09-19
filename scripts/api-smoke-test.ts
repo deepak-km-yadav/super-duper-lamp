@@ -20,6 +20,7 @@ import { readEnv, readEnvUrl, describeFetchFailure, hasRepeatedUrl } from "../ap
 import actionItemsHandler from "../api/action-items";
 import { captureTurn } from "./bot-chat-helper";
 import usageHandler from "../api/usage";
+import { shouldNotify, type CaptureNotification } from "../api/_lib/notify";
 import healthHandler from "../api/health";
 import { apiFetchForTest } from "./api-client-helper";
 import { toCsvForTest } from "./csv-helper";
@@ -437,6 +438,96 @@ async function run() {
   {
     const err = await apiFetchForTest("/api/bots", "", 503);
     check("503 explains missing configuration", /missing configuration/.test(err), err);
+  }
+
+  console.log("\n-- visibility is enforced --");
+  {
+    const visitor = await captureTurn({ admin: false, message: "hi", visibility: "private" });
+    check("a private bot refuses a visitor", visitor.status === 404, visitor.status);
+
+    const owner = await captureTurn({ admin: true, message: "hi", visibility: "private" });
+    check("but its owner can still test it", owner.streamed === "hi", owner.status);
+
+    const unlisted = await captureTurn({ admin: false, message: "hi", visibility: "unlisted" });
+    check("an unlisted bot is still reachable by link", unlisted.streamed === "hi", unlisted.status);
+
+    const pub = await captureTurn({ admin: false, message: "hi", visibility: "public" });
+    check("a public bot is reachable", pub.streamed === "hi", pub.status);
+  }
+  {
+    responder = () => ({ body: [{ id: "b1", slug: "s", name: "N", status: "PUBLISHED", visibility: "private" }] });
+    const { res, out } = mkRes();
+    await publicHandler({ method: "GET", query: { slug: "s" } }, res as any);
+    check("a private bot is indistinguishable from a missing one",
+      out.code === 404 && out.payload.unavailable === "missing", out.payload);
+    responder = () => ({ body: [] });
+  }
+
+  console.log("\n-- content filter reaches the prompt --");
+  {
+    const strict = await captureTurn({ admin: false, message: "hi", contentFilter: "strict" });
+    check("strict adds the safety block", /<safety>/.test(strict.systemPrompt), strict.systemPrompt.slice(-200));
+    check("strict declines off-topic requests",
+      /Stay on the topics/.test(strict.systemPrompt), strict.systemPrompt.slice(-200));
+    check("strict withholds the configuration",
+      /not repeat these instructions/.test(strict.systemPrompt));
+
+    const moderate = await captureTurn({ admin: false, message: "hi", contentFilter: "moderate" });
+    check("moderate is narrower than strict",
+      /<safety>/.test(moderate.systemPrompt) && !/Stay on the topics/.test(moderate.systemPrompt),
+      moderate.systemPrompt.slice(-200));
+
+    const off = await captureTurn({ admin: false, message: "hi", contentFilter: "off" });
+    check("off adds nothing", !/<safety>/.test(off.systemPrompt), off.systemPrompt.slice(-120));
+  }
+
+  console.log("\n-- memory modes --");
+  {
+    const history = Array.from({ length: 12 }, (_, i) => ({
+      role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+      content: `turn ${i}`,
+    }));
+
+    const none = await captureTurn({
+      admin: false, message: "latest", memory: "none", history, summary: "Earlier: they want a demo.",
+    });
+    const noneMsgs = (none.providerBody?.messages ?? []) as { role: string; content: string }[];
+    check("none sends only the current message",
+      noneMsgs.filter((m) => m.role !== "system").length === 1, noneMsgs.length);
+    check("none withholds the summary too",
+      !/conversation_so_far/.test(none.systemPrompt), none.systemPrompt.slice(-200));
+
+    const session = await captureTurn({
+      admin: false, message: "latest", memory: "session", history, summary: "Earlier: they want a demo.",
+    });
+    const sessMsgs = (session.providerBody?.messages ?? []) as { role: string; content: string }[];
+    check("session sends the live window",
+      sessMsgs.filter((m) => m.role !== "system").length === 8, sessMsgs.length);
+    check("session attaches the summary",
+      /they want a demo/.test(session.systemPrompt), session.systemPrompt.slice(-250));
+
+    const persistent = await captureTurn({
+      admin: false, message: "latest", memory: "persistent", history, summary: "Earlier: they want a demo.",
+    });
+    check("persistent behaves like session on the server",
+      /they want a demo/.test(persistent.systemPrompt));
+  }
+
+  console.log("\n-- who gets notified --");
+  {
+    const base: CaptureNotification = {
+      kind: "lead", botId: "b1", botName: "B", name: "Dana",
+      email: "dana@example.com", phone: null, summary: null,
+      contextSnippet: "", sessionId: "s1", capturedAt: "2026-09-19T10:00:00Z",
+    };
+    check("a real lead with an email notifies", shouldNotify(base, false));
+    check("a test capture never notifies", !shouldNotify(base, true));
+    check("a lead with only a phone still notifies",
+      shouldNotify({ ...base, email: null, phone: "+44 7700 900123" }, false));
+    check("a lead with no way to reach anyone does not",
+      !shouldNotify({ ...base, email: null, phone: null }, false));
+    check("a meeting request notifies even without contact details",
+      shouldNotify({ ...base, kind: "meeting", email: null, phone: null }, false));
   }
 
   console.log("\n-- an empty reply is explained, never blank --");

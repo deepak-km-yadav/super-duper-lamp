@@ -15,6 +15,7 @@ type PublicRow = {
   slug: string;
   name: string;
   status: string;
+  visibility: string;
   [k: string]: unknown;
 };
 
@@ -34,6 +35,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     if (!row) return res.status(404).json({ unavailable: "missing" });
 
+    // Private means private: indistinguishable from a bot that does not exist,
+    // so the slug cannot be probed. Until now this setting did nothing at all.
+    if (row.visibility === "private") {
+      return res.status(404).json({ unavailable: "missing" });
+    }
+
     if (row.status !== "PUBLISHED") {
       // Name only, so the paused screen can say which bot it was.
       return res.status(200).json({ unavailable: "unpublished", name: row.name });
@@ -41,6 +48,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     const bot = rowToBot(row) as Record<string, unknown>;
     delete bot.status;
+    delete bot.visibility;
     return res.status(200).json({ bot });
   } catch (e) {
     const err = e as SupabaseError;

@@ -41,18 +41,19 @@ export function ActionItemsPage() {
   const [data, setData] = React.useState<ActionItems | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
+  const [includeTest, setIncludeTest] = React.useState(false);
 
   const load = React.useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      setData(await fetchActionItems());
+      setData(await fetchActionItems(includeTest));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load action items.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [includeTest]);
 
   React.useEffect(() => {
     if (hasToken) void load();
@@ -113,6 +114,15 @@ export function ActionItemsPage() {
           </p>
         </div>
         <div className="flex items-center gap-1.5">
+          <label className="mr-1 inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted">
+            <input
+              type="checkbox"
+              checked={includeTest}
+              onChange={(e) => setIncludeTest(e.target.checked)}
+              className="h-3.5 w-3.5 rounded"
+            />
+            Show test captures
+          </label>
           <Button variant="secondary" size="sm" onClick={() => void load()} disabled={loading}>
             {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
             Refresh
@@ -208,6 +218,7 @@ function EmptyState({ tab }: { tab: Tab }) {
 
 function Card({
   title,
+  isTest,
   subtitle,
   meta,
   status,
@@ -218,6 +229,7 @@ function Card({
   children,
 }: {
   title: string;
+  isTest?: boolean;
   subtitle?: React.ReactNode;
   meta: string;
   status: string;
@@ -233,7 +245,14 @@ function Card({
     <div className="rounded-xl border border-border bg-surface/70 p-4 backdrop-blur">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <h3 className="truncate font-semibold">{title}</h3>
+          <h3 className="flex items-center gap-2 truncate font-semibold">
+            {title}
+            {isTest && (
+              <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted">
+                Test
+              </span>
+            )}
+          </h3>
           {subtitle && <div className="mt-1 text-sm text-muted">{subtitle}</div>}
           {children}
         </div>
@@ -337,6 +356,7 @@ function LeadCard({ lead, onChanged }: { lead: Lead; onChanged: () => void }) {
   return (
     <Card
       title={lead.name || lead.email || lead.phone || "Unnamed lead"}
+      isTest={lead.isTest}
       subtitle={
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
           {lead.email && (
@@ -379,6 +399,7 @@ function MeetingCard({ meeting, onChanged }: { meeting: Meeting; onChanged: () =
   return (
     <Card
       title={meeting.requestedFor || "Meeting requested"}
+      isTest={meeting.isTest}
       subtitle={
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
           {meeting.name && (

@@ -18,6 +18,7 @@ import keysHandler from "../api/provider-keys";
 import { detectSignals, buildContextSnippet } from "../api/_lib/detect";
 import { readEnv, readEnvUrl, describeFetchFailure, hasRepeatedUrl } from "../api/_lib/env";
 import actionItemsHandler from "../api/action-items";
+import { captureTurn } from "./bot-chat-helper";
 import healthHandler from "../api/health";
 import { apiFetchForTest } from "./api-client-helper";
 import { toCsvForTest } from "./csv-helper";
@@ -435,6 +436,69 @@ async function run() {
   {
     const err = await apiFetchForTest("/api/bots", "", 503);
     check("503 explains missing configuration", /missing configuration/.test(err), err);
+  }
+
+  console.log("\n-- editor tests are captured, and flagged --");
+  {
+    // The regression: an admin request used to create no session at all, so
+    // the editor's Live test panel captured nothing and said nothing.
+    const admin = await captureTurn({ admin: true, message: "I'm Dana, dana@example.com" });
+    check("an admin request creates a session", admin.sessionCreated, admin.calls);
+    check("the session is flagged as a test", admin.sessionRow?.is_test === true, admin.sessionRow);
+    check("a lead is captured from the editor", Boolean(admin.leadRow), admin.calls);
+    check("the lead is flagged as a test", admin.leadRow?.is_test === true, admin.leadRow);
+    check("the email reaches the lead row", admin.leadRow?.email === "dana@example.com", admin.leadRow);
+    check("no capture error is reported", admin.captureError === undefined, admin.captureError);
+
+    const visitor = await captureTurn({ admin: false, message: "I'm Dana, dana@example.com" });
+    check("a visitor request is not flagged as a test", visitor.sessionRow?.is_test === false, visitor.sessionRow);
+    check("the visitor lead is not flagged", visitor.leadRow?.is_test === false, visitor.leadRow);
+  }
+
+  console.log("\n-- capture failures are reported to the tester only --");
+  {
+    const admin = await captureTurn({
+      admin: true,
+      message: "dana@example.com",
+      failLeads: "permission denied for table leads",
+    });
+    check("the stream still succeeds", admin.streamed === "hi", admin.streamed);
+    check("an admin sees why the capture failed",
+      /permission denied/.test(admin.captureError ?? ""), admin.captureError);
+
+    const visitor = await captureTurn({
+      admin: false,
+      message: "dana@example.com",
+      failLeads: "permission denied for table leads",
+    });
+    check("a visitor is never shown a capture error", visitor.captureError === undefined, visitor.captureError);
+    check("and their stream still succeeds", visitor.streamed === "hi", visitor.streamed);
+  }
+
+  console.log("\n-- Action Items hides test captures by default --");
+  {
+    const seen: string[] = [];
+    responder = (c) => {
+      if (c.url.startsWith("leads") || c.url.startsWith("meeting_requests")) seen.push(c.url);
+      return { body: [] };
+    };
+    const { res } = mkRes();
+    await actionItemsHandler(
+      { method: "GET", headers: { "x-admin-token": "admin-secret-token" } },
+      res as any,
+    );
+    check("default query excludes test rows",
+      seen.every((u) => u.includes("is_test=eq.false")), seen);
+
+    seen.length = 0;
+    const { res: res2 } = mkRes();
+    await actionItemsHandler(
+      { method: "GET", query: { includeTest: "1" }, headers: { "x-admin-token": "admin-secret-token" } },
+      res2 as any,
+    );
+    check("includeTest=1 returns everything",
+      seen.every((u) => !u.includes("is_test")), seen);
+    responder = () => ({ body: [] });
   }
 
   console.log("\n-- OpenAI parameter shape --");

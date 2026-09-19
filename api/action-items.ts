@@ -15,6 +15,7 @@ import {
 } from "./_lib/http.js";
 
 type LeadRow = {
+  is_test: boolean;
   id: number;
   bot_id: string | null;
   session_id: string | null;
@@ -31,6 +32,7 @@ type LeadRow = {
 };
 
 type MeetingRow = {
+  is_test: boolean;
   id: number;
   bot_id: string | null;
   session_id: string | null;
@@ -74,6 +76,9 @@ async function handleGet(req: ApiRequest, res: ApiResponse) {
   const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(500, limitRaw)) : 200;
   const botId = queryParam(req, "botId");
   const sessionId = queryParam(req, "sessionId");
+  // Captures made while testing in the editor are hidden unless asked for, so
+  // the real list stays clean.
+  const includeTest = queryParam(req, "includeTest") === "1";
 
   // Full transcript for the "see the conversation" drawer.
   if (sessionId) {
@@ -85,15 +90,16 @@ async function handleGet(req: ApiRequest, res: ApiResponse) {
   }
 
   const botFilter = botId ? `&bot_id=eq.${encodeURIComponent(botId)}` : "";
+  const testFilter = includeTest ? "" : "&is_test=eq.false";
 
   const [leads, meetings, bots] = await Promise.all([
     sbSelect<LeadRow>(
       "leads",
-      `select=*${botFilter}&order=created_at.desc&limit=${limit}`,
+      `select=*${botFilter}${testFilter}&order=created_at.desc&limit=${limit}`,
     ),
     sbSelect<MeetingRow>(
       "meeting_requests",
-      `select=*${botFilter}&order=created_at.desc&limit=${limit}`,
+      `select=*${botFilter}${testFilter}&order=created_at.desc&limit=${limit}`,
     ),
     sbSelect<{ id: string; name: string }>("bots", "select=id,name"),
   ]);
@@ -116,6 +122,7 @@ async function handleGet(req: ApiRequest, res: ApiResponse) {
       contextSnippet: l.context_snippet,
       status: l.status,
       detectedBy: l.detected_by,
+      isTest: l.is_test,
       createdAt: l.created_at,
     })),
     meetings: meetings.map((m) => ({
@@ -130,6 +137,7 @@ async function handleGet(req: ApiRequest, res: ApiResponse) {
       topic: m.topic,
       contextSnippet: m.context_snippet,
       status: m.status,
+      isTest: m.is_test,
       createdAt: m.created_at,
     })),
   });

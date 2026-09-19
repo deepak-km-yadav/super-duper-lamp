@@ -44,7 +44,7 @@ export type UseChatOptions = {
  */
 
 type ProxyEvent =
-  | { t: "meta"; sessionId: string | null; providerId?: string; modelId?: string }
+  | { t: "meta"; sessionId: string | null; providerId?: string; modelId?: string; captureError?: string }
   | { t: "delta"; v: string }
   | { t: "usage"; in?: number; out?: number }
   | { t: "error"; message: string }
@@ -56,6 +56,8 @@ type StreamResult = {
   sessionId?: string | null;
   providerId?: string;
   modelId?: string;
+  /** Only sent to admin requests: why a lead/meeting could not be saved. */
+  captureError?: string;
 };
 
 async function streamViaProxy(
@@ -103,7 +105,12 @@ async function streamViaProxy(
       return {};
     }
     if (ev.t === "meta") {
-      return { sessionId: ev.sessionId, providerId: ev.providerId, modelId: ev.modelId };
+      return {
+        sessionId: ev.sessionId,
+        providerId: ev.providerId,
+        modelId: ev.modelId,
+        captureError: ev.captureError,
+      };
     }
     if (ev.t === "done") return { sessionId: ev.sessionId };
     return {};
@@ -125,6 +132,7 @@ async function parseSseStream(
     sessionId?: string | null;
     providerId?: string;
     modelId?: string;
+    captureError?: string;
   },
 ): Promise<StreamResult> {
   const reader = res.body!.getReader();
@@ -135,6 +143,7 @@ async function parseSseStream(
   let sessionId: string | null | undefined;
   let providerId: string | undefined;
   let modelId: string | undefined;
+  let captureError: string | undefined;
 
   try {
     while (true) {
@@ -158,6 +167,7 @@ async function parseSseStream(
           }
           if (parsed.providerId) providerId = parsed.providerId;
           if (parsed.modelId) modelId = parsed.modelId;
+          if (parsed.captureError) captureError = parsed.captureError;
         } catch {
           // skip malformed SSE frames
         }
@@ -167,25 +177,32 @@ async function parseSseStream(
     reader.releaseLock();
   }
 
-  return { promptTokens, completionTokens, sessionId, providerId, modelId };
+  return { promptTokens, completionTokens, sessionId, providerId, modelId, captureError };
 }
 
-/** Remembers the conversation across a refresh, so `memory: "session"` means something. */
-function sessionKey(slug: string): string {
-  return `botforge:session:${slug}`;
+/**
+ * Remembers the conversation across a refresh, so `memory: "session"` means
+ * something.
+ *
+ * Keyed by mode as well as slug: the editor and the public page share an
+ * origin, so a single key would let an editor test continue a visitor's
+ * session, or the reverse. The server checks this too.
+ */
+function sessionKey(slug: string, isTest: boolean): string {
+  return `botforge:session:${slug}:${isTest ? "test" : "live"}`;
 }
 
-function loadSessionId(slug: string): string | null {
+function loadSessionId(slug: string, isTest: boolean): string | null {
   try {
-    return window.sessionStorage.getItem(sessionKey(slug));
+    return window.sessionStorage.getItem(sessionKey(slug, isTest));
   } catch {
     return null;
   }
 }
 
-function saveSessionId(slug: string, id: string): void {
+function saveSessionId(slug: string, isTest: boolean, id: string): void {
   try {
-    window.sessionStorage.setItem(sessionKey(slug), id);
+    window.sessionStorage.setItem(sessionKey(slug, isTest), id);
   } catch {
     // Non-fatal: the server just starts a new session next time.
   }
@@ -197,12 +214,13 @@ export function useChat(opts: UseChatOptions) {
   const [isStreaming, setIsStreaming] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [stats, setStats] = React.useState<UsageStats | null>(null);
+  const [captureError, setCaptureError] = React.useState<string | null>(null);
   const abortRef = React.useRef<AbortController | null>(null);
 
   const sessionIdRef = React.useRef<string | null>(null);
   React.useEffect(() => {
-    sessionIdRef.current = loadSessionId(slug);
-  }, [slug]);
+    sessionIdRef.current = loadSessionId(slug, Boolean(adminToken));
+  }, [slug, adminToken]);
 
   const optsRef = React.useRef({ botId, slug, draft, adminToken });
   React.useEffect(() => {
@@ -217,6 +235,7 @@ export function useChat(opts: UseChatOptions) {
       setIsStreaming(true);
       setError(null);
       setStats(null);
+      setCaptureError(null);
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -254,10 +273,11 @@ export function useChat(opts: UseChatOptions) {
 
         promptTokens = result.promptTokens;
         completionTokens = result.completionTokens;
+        if (result.captureError) setCaptureError(result.captureError);
 
         if (result.sessionId) {
           sessionIdRef.current = result.sessionId;
-          saveSessionId(current.slug, result.sessionId);
+          saveSessionId(current.slug, Boolean(current.adminToken), result.sessionId);
         }
 
         const latencyMs = Math.round(performance.now() - startedAt);
@@ -333,5 +353,5 @@ export function useChat(opts: UseChatOptions) {
     setStats(null);
   }, [initialMessages]);
 
-  return { messages, send, stop, regenerate, reset, isStreaming, error, stats };
+  return { messages, send, stop, regenerate, reset, isStreaming, error, stats, captureError };
 }

@@ -21,7 +21,7 @@ export function TestPanel({ draft }: { draft: Bot }) {
   // The admin token lets the proxy accept unsaved edits and an unpublished bot,
   // so the draft can be tested without a provider key in the browser. Knowledge
   // is not sent: it already lives server-side and is saved as soon as uploaded.
-  const { messages, send, stop, regenerate, reset, isStreaming, error, stats } = useChat({
+  const { messages, send, stop, regenerate, reset, isStreaming, error, stats, captureError } = useChat({
     slug: draft.slug,
     botId: draft.id,
     adminToken: getAdminToken(),
@@ -58,6 +58,19 @@ export function TestPanel({ draft }: { draft: Bot }) {
           <Eraser size={12} /> Reset
         </button>
       </div>
+
+      {draft.agentEnabled && (draft.agentActions?.length ?? 0) > 0 && (
+        <p className="border-b border-border bg-bg/40 px-4 py-1.5 text-[11px] text-muted">
+          Anything captured here is saved and marked as a test. Turn on{" "}
+          <em>Show test captures</em> in Action Items to see it.
+        </p>
+      )}
+
+      {captureError && (
+        <p className="border-b border-red-500/30 bg-red-500/5 px-4 py-1.5 text-[11px] text-red-500">
+          Capture failed — {captureError}
+        </p>
+      )}
 
       <ChatThread
         messages={messages}

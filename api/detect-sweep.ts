@@ -15,7 +15,7 @@ import { analyzeSession } from "./chat-turn.js";
 const CRON_SECRET = process.env.CRON_SECRET || "";
 const BATCH = 25;
 
-type SessionRow = { id: string; bot_id: string };
+type SessionRow = { id: string; bot_id: string; is_test: boolean };
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   applyCors(res, "GET, POST");
@@ -34,14 +34,14 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
     const sessions = await sbSelect<SessionRow>(
       "chat_sessions",
-      `select=id,bot_id&analyzed_at=is.null&last_message_at=lt.${cutoff}` +
+      `select=id,bot_id,is_test&analyzed_at=is.null&last_message_at=lt.${cutoff}` +
         `&order=last_message_at.asc&limit=${BATCH}`,
     );
 
     let analyzed = 0;
     for (const s of sessions) {
       try {
-        await analyzeSession(s.id, s.bot_id);
+        await analyzeSession(s.id, s.bot_id, s.is_test);
         analyzed++;
       } catch {
         // One bad session must not stop the batch.

@@ -17,7 +17,7 @@ import {
   isExtractionConfigured,
 } from "./_lib/extract.js";
 
-type SessionRow = { id: string; bot_id: string; analyzed_at: string | null };
+type SessionRow = { id: string; bot_id: string; analyzed_at: string | null; is_test: boolean };
 type BotRow = { id: string; agent_enabled: boolean; agent_actions: string[] };
 type MessageRow = { role: string; content: string };
 
@@ -38,7 +38,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   try {
     const session = await sbSelectOne<SessionRow>(
       "chat_sessions",
-      `select=id,bot_id,analyzed_at&id=eq.${sessionId}`,
+      `select=id,bot_id,analyzed_at,is_test&id=eq.${sessionId}`,
     );
     // An unknown session is not an error worth surfacing to a visitor.
     if (!session) return res.status(200).json({ ok: true });
@@ -60,7 +60,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       });
     }
 
-    await analyzeSession(session.id, session.bot_id);
+    await analyzeSession(session.id, session.bot_id, session.is_test);
     return res.status(200).json({ ok: true });
   } catch (e) {
     const err = e as SupabaseError;
@@ -74,7 +74,11 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
  * Fills in what the regex pass could not read. Exported so the hourly sweeper
  * can run exactly the same logic over abandoned sessions.
  */
-export async function analyzeSession(sessionId: string, botId: string): Promise<void> {
+export async function analyzeSession(
+  sessionId: string,
+  botId: string,
+  isTest = false,
+): Promise<void> {
   const bot = await sbSelectOne<BotRow>(
     "bots",
     `select=id,agent_enabled,agent_actions&id=eq.${botId}`,
@@ -100,10 +104,10 @@ export async function analyzeSession(sessionId: string, botId: string): Promise<
   const snippet = buildContextSnippet(messages);
 
   if (actions.includes("lead_magnet")) {
-    await enrichLead(sessionId, botId, transcript, snippet);
+    await enrichLead(sessionId, botId, transcript, snippet, isTest);
   }
   if (actions.includes("scheduler")) {
-    await enrichMeeting(sessionId, botId, transcript, snippet);
+    await enrichMeeting(sessionId, botId, transcript, snippet, isTest);
   }
 }
 
@@ -112,6 +116,7 @@ async function enrichLead(
   botId: string,
   transcript: string,
   snippet: string,
+  isTest: boolean,
 ): Promise<void> {
   const extracted = await extractLead(transcript);
   if (!extracted) return;
@@ -146,7 +151,7 @@ async function enrichLead(
   if (match) {
     await sbUpdate("leads", `id=eq.${match.id}`, payload);
   } else {
-    await sbInsert("leads", { bot_id: botId, session_id: sessionId, ...payload });
+    await sbInsert("leads", { bot_id: botId, session_id: sessionId, is_test: isTest, ...payload });
   }
 }
 
@@ -155,6 +160,7 @@ async function enrichMeeting(
   botId: string,
   transcript: string,
   snippet: string,
+  isTest: boolean,
 ): Promise<void> {
   const extracted = await extractMeeting(transcript);
   if (!extracted?.isMeetingRequest) return;
@@ -176,6 +182,6 @@ async function enrichMeeting(
   if (existing) {
     await sbUpdate("meeting_requests", `id=eq.${existing.id}`, payload);
   } else {
-    await sbInsert("meeting_requests", { bot_id: botId, session_id: sessionId, ...payload });
+    await sbInsert("meeting_requests", { bot_id: botId, session_id: sessionId, is_test: isTest, ...payload });
   }
 }

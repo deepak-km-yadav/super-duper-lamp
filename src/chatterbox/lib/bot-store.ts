@@ -11,60 +11,14 @@
  */
 
 import type { Bot, PublicBot } from "./types";
+import { apiFetch, ApiError } from "./api-client";
 import { getAdminToken } from "./admin-token";
 import { loadAll as loadLocalBots } from "./local-store";
 
 const MIGRATED_KEY = "botforge:migrated:v1";
 
-export class StoreError extends Error {
-  status: number;
-  constructor(message: string, status: number) {
-    super(message);
-    this.name = "StoreError";
-    this.status = status;
-  }
-}
-
-async function api<T>(
-  path: string,
-  init?: { method?: string; body?: unknown },
-): Promise<T> {
-  let res: Response;
-  try {
-    res = await fetch(path, {
-      method: init?.method ?? "GET",
-      headers: {
-        "Content-Type": "application/json",
-        "x-admin-token": getAdminToken(),
-      },
-      body: init?.body === undefined ? undefined : JSON.stringify(init.body),
-    });
-  } catch {
-    throw new StoreError("Could not reach the server. Check your connection.", 0);
-  }
-
-  const text = await res.text();
-  let payload: Record<string, unknown> = {};
-  if (text) {
-    try {
-      payload = JSON.parse(text) as Record<string, unknown>;
-    } catch {
-      throw new StoreError("The server returned an unexpected response.", 502);
-    }
-  }
-
-  if (!res.ok) {
-    const message =
-      typeof payload.error === "string" && payload.error
-        ? payload.error
-        : res.status === 401
-          ? "Unauthorized. Check your admin token in Settings."
-          : `Request failed (${res.status})`;
-    throw new StoreError(message, res.status);
-  }
-
-  return payload as T;
-}
+/** Kept as an alias so existing `instanceof StoreError` checks still hold. */
+export { ApiError as StoreError };
 
 // ---------------------------------------------------------------------------
 // Admin CRUD
@@ -72,27 +26,27 @@ async function api<T>(
 
 export async function listBots(opts?: { includeArchived?: boolean }): Promise<Bot[]> {
   const q = opts?.includeArchived ? "?includeArchived=1" : "";
-  const { bots } = await api<{ bots: Bot[] }>(`/api/bots${q}`);
+  const { bots } = await apiFetch<{ bots: Bot[] }>(`/api/bots${q}`);
   return bots ?? [];
 }
 
 export async function getBot(id: string): Promise<Bot | null> {
   try {
-    const { bot } = await api<{ bot: Bot }>(`/api/bots?id=${encodeURIComponent(id)}`);
+    const { bot } = await apiFetch<{ bot: Bot }>(`/api/bots?id=${encodeURIComponent(id)}`);
     return bot ?? null;
   } catch (e) {
-    if (e instanceof StoreError && e.status === 404) return null;
+    if (e instanceof ApiError && e.status === 404) return null;
     throw e;
   }
 }
 
 export async function createBot(input: Partial<Bot>): Promise<Bot> {
-  const { bot } = await api<{ bot: Bot }>("/api/bots", { method: "POST", body: input });
+  const { bot } = await apiFetch<{ bot: Bot }>("/api/bots", { method: "POST", body: input });
   return bot;
 }
 
 export async function updateBot(id: string, patch: Partial<Bot>): Promise<Bot> {
-  const { bot } = await api<{ bot: Bot }>(`/api/bots?id=${encodeURIComponent(id)}`, {
+  const { bot } = await apiFetch<{ bot: Bot }>(`/api/bots?id=${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: { patch },
   });
@@ -100,7 +54,7 @@ export async function updateBot(id: string, patch: Partial<Bot>): Promise<Bot> {
 }
 
 export async function removeBot(id: string): Promise<void> {
-  await api(`/api/bots?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+  await apiFetch(`/api/bots?id=${encodeURIComponent(id)}`, { method: "DELETE" });
 }
 
 export async function setBotStatus(
@@ -139,28 +93,15 @@ export type PublicBotResult =
   | { kind: "missing" };
 
 export async function getPublicBot(slug: string): Promise<PublicBotResult> {
-  let res: Response;
+  let payload: Record<string, unknown>;
   try {
-    res = await fetch(`/api/bot-public?slug=${encodeURIComponent(slug)}`);
-  } catch {
-    throw new StoreError("Could not reach the server. Check your connection.", 0);
-  }
-
-  if (res.status === 404) return { kind: "missing" };
-
-  const text = await res.text();
-  let payload: Record<string, unknown> = {};
-  try {
-    payload = text ? (JSON.parse(text) as Record<string, unknown>) : {};
-  } catch {
-    throw new StoreError("The server returned an unexpected response.", 502);
-  }
-
-  if (!res.ok) {
-    throw new StoreError(
-      typeof payload.error === "string" ? payload.error : `Request failed (${res.status})`,
-      res.status,
+    payload = await apiFetch<Record<string, unknown>>(
+      `/api/bot-public?slug=${encodeURIComponent(slug)}`,
+      { auth: false },
     );
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return { kind: "missing" };
+    throw e;
   }
 
   if (payload.unavailable === "unpublished") {
@@ -202,7 +143,7 @@ export async function migrateLocalBotsOnce(): Promise<MigrationResult | null> {
     return null;
   }
 
-  const result = await api<MigrationResult>("/api/bots", {
+  const result = await apiFetch<MigrationResult>("/api/bots", {
     method: "POST",
     body: { op: "import", bots: local },
   });

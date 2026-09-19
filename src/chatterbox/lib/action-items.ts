@@ -1,6 +1,6 @@
 /** Client for /api/action-items. */
 
-import { getAdminToken } from "./admin-token";
+import { apiFetch } from "./api-client";
 
 export type Lead = {
   id: number;
@@ -37,35 +37,12 @@ export type Meeting = {
 export type ActionItems = { leads: Lead[]; meetings: Meeting[] };
 export type TranscriptMessage = { role: string; content: string; created_at: string };
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      "x-admin-token": getAdminToken(),
-      ...(init?.headers as Record<string, string> | undefined),
-    },
-  });
-  const text = await res.text();
-  const body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
-  if (!res.ok) {
-    throw new Error(
-      typeof body.error === "string"
-        ? body.error
-        : res.status === 401
-          ? "Unauthorized. Check your admin token."
-          : `Request failed (${res.status})`,
-    );
-  }
-  return body as T;
-}
-
 export function fetchActionItems(): Promise<ActionItems> {
-  return request<ActionItems>("/api/action-items");
+  return apiFetch<ActionItems>("/api/action-items");
 }
 
 export function fetchTranscript(sessionId: string): Promise<{ messages: TranscriptMessage[] }> {
-  return request(`/api/action-items?sessionId=${encodeURIComponent(sessionId)}`);
+  return apiFetch(`/api/action-items?sessionId=${encodeURIComponent(sessionId)}`);
 }
 
 export function setItemStatus(
@@ -73,9 +50,9 @@ export function setItemStatus(
   id: number,
   status: string,
 ): Promise<unknown> {
-  return request("/api/action-items", {
+  return apiFetch("/api/action-items", {
     method: "PATCH",
-    body: JSON.stringify({ kind, id, status }),
+    body: { kind, id, status },
   });
 }
 

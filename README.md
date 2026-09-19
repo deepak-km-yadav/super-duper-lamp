@@ -87,5 +87,24 @@ npm run typecheck  # type-checks api/, which vite build does not cover
 npm run test:api   # handler smoke tests against a stubbed PostgREST
 ```
 
+`npm run dev` starts Vite only and does **not** serve `/api`, so anything that
+touches the server (creating a bot, the dashboard, public chat) will fail
+against it. Use `npx vercel dev` for the full app.
+
+## Checking a deployment
+
+`GET /api/health` reports whether the serverless functions are running. With
+the admin token it also reports which environment variables are set (never
+their values) and whether each table actually answers:
+
+```bash
+curl -s https://<your-app>/api/health                       # is /api alive?
+curl -s https://<your-app>/api/health -H "x-admin-token: $TOKEN" | jq
+```
+
+`ready: true` means everything is configured. Otherwise `tables` and `warnings`
+name the problem — most often the anon key used in place of the service role
+key, or the migration not yet applied.
+
 `npm run test:api` needs `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and
 `BOTFORGE_ADMIN_TOKEN` set to any placeholder values.

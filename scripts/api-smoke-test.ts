@@ -17,6 +17,8 @@ import publicHandler from "../api/bot-public";
 import keysHandler from "../api/provider-keys";
 import { detectSignals, buildContextSnippet } from "../api/_lib/detect";
 import actionItemsHandler from "../api/action-items";
+import healthHandler from "../api/health";
+import { apiFetchForTest } from "./api-client-helper";
 import { toCsvForTest } from "./csv-helper";
 
 type Call = { method: string; url: string; body: unknown };
@@ -323,6 +325,56 @@ async function run() {
     check("newlines are quoted", csv.includes('"line1\nline2"'), csv);
     check("commas are quoted", csv.includes('"a,b@x.com"'), csv);
     check("header row present", csv.startsWith("name,note,email"), csv);
+  }
+
+  console.log("\n-- health endpoint --");
+  {
+    const { res, out } = mkRes();
+    await healthHandler({ method: "GET", headers: {} }, res as any);
+    check("unauthenticated health proves /api is alive", out.payload.api === "ok", out.payload);
+    check("unauthenticated health leaks no config",
+      out.payload.env === undefined && out.payload.tables === undefined, out.payload);
+  }
+  {
+    responder = () => ({ body: [] });
+    const { res, out } = mkRes();
+    await healthHandler(
+      { method: "GET", headers: { "x-admin-token": "admin-secret-token" } },
+      res as any,
+    );
+    check("authenticated health reports env presence as booleans",
+      out.payload.env.SUPABASE_URL === true &&
+        typeof out.payload.env.SUPABASE_SERVICE_ROLE_KEY === "boolean", out.payload.env);
+    check("health never returns a secret value",
+      !JSON.stringify(out.payload).includes("admin-secret-token"), out.payload);
+    check("health checks the tables", out.payload.tables?.bots?.ok === true, out.payload.tables);
+  }
+
+  console.log("\n-- client error messages --");
+  {
+    // The failure the user actually hit: /api falls through to the SPA and
+    // returns index.html, so the body is a web page rather than JSON.
+    const err = await apiFetchForTest("/api/bots", "<!DOCTYPE html><html><body>app</body></html>", 200);
+    check("HTML body names the cause", /web page instead of data/i.test(err), err);
+    check("HTML body suggests vercel dev", /vercel dev/.test(err), err);
+    check("HTML body no longer says 'unexpected response'",
+      !/unexpected response/i.test(err), err);
+  }
+  {
+    const err = await apiFetchForTest("/api/bots", "<!DOCTYPE html>", 404);
+    check("404 HTML says the route isn't deployed", /isn't deployed/.test(err), err);
+  }
+  {
+    const err = await apiFetchForTest("/api/bots", "not json at all", 200);
+    check("non-JSON, non-HTML body is quoted back", /isn't JSON/.test(err), err);
+  }
+  {
+    const err = await apiFetchForTest("/api/bots", JSON.stringify({ error: "Unauthorized" }), 401);
+    check("JSON errors still pass through", err === "Unauthorized", err);
+  }
+  {
+    const err = await apiFetchForTest("/api/bots", "", 503);
+    check("503 explains missing configuration", /missing configuration/.test(err), err);
   }
 
   console.log("\n-- signal detection --");

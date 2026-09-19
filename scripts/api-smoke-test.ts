@@ -21,6 +21,13 @@ import actionItemsHandler from "../api/action-items";
 import healthHandler from "../api/health";
 import { apiFetchForTest } from "./api-client-helper";
 import { toCsvForTest } from "./csv-helper";
+import {
+  captureRequests,
+  sseChunk,
+  capabilitiesFor,
+  clientCapabilitiesFor,
+  repairBody,
+} from "./openai-params-helper";
 
 type Call = { method: string; url: string; body: unknown };
 const calls: Call[] = [];
@@ -428,6 +435,96 @@ async function run() {
   {
     const err = await apiFetchForTest("/api/bots", "", 503);
     check("503 explains missing configuration", /missing configuration/.test(err), err);
+  }
+
+  console.log("\n-- OpenAI parameter shape --");
+  {
+    for (const model of ["gpt-5", "gpt-5-mini", "o3", "o3-mini", "o1"]) {
+      const { sent } = await captureRequests("openai", model, [
+        { status: 200, body: sseChunk("hi") },
+      ]);
+      const b = sent[0].body;
+      check(`openai/${model} sends max_completion_tokens`,
+        b.max_completion_tokens === 512 && b.max_tokens === undefined, b);
+      check(`openai/${model} omits temperature and top_p`,
+        b.temperature === undefined && b.top_p === undefined, b);
+    }
+
+    for (const model of ["gpt-4o", "gpt-4.1", "gpt-4-turbo"]) {
+      const { sent } = await captureRequests("openai", model, [
+        { status: 200, body: sseChunk("hi") },
+      ]);
+      const b = sent[0].body;
+      check(`openai/${model} keeps max_tokens`,
+        b.max_tokens === 512 && b.max_completion_tokens === undefined, b);
+      check(`openai/${model} keeps sampling`,
+        b.temperature === 0.4 && b.top_p === 0.9, b);
+    }
+
+    // The OpenAI rule must not leak: these providers expect max_tokens.
+    for (const provider of ["groq", "mistral", "deepseek", "together", "xai", "openrouter"]) {
+      const { sent } = await captureRequests(provider, "gpt-5-lookalike", [
+        { status: 200, body: sseChunk("hi") },
+      ]);
+      const b = sent[0].body;
+      check(`${provider} still gets max_tokens and sampling`,
+        b.max_tokens === 512 && b.temperature === 0.4 && b.top_p === 0.9, b);
+    }
+  }
+
+  console.log("\n-- self-healing retry --");
+  {
+    const rejection = JSON.stringify({
+      error: {
+        message:
+          "Unsupported parameter: 'max_tokens' is not supported with this model. " +
+          "Use 'max_completion_tokens' instead.",
+      },
+    });
+    // A provider we deliberately do not special-case, so only the retry can save it.
+    const { sent, text, error } = await captureRequests("groq", "some-future-model", [
+      { status: 400, body: rejection },
+      { status: 200, body: sseChunk("recovered") },
+    ]);
+    check("retries once after an unsupported-parameter 400", sent.length === 2, sent.length);
+    check("retry renames to the suggested parameter",
+      sent[1].body.max_completion_tokens === 512 && sent[1].body.max_tokens === undefined,
+      sent[1].body);
+    check("retry leaves other fields intact", sent[1].body.model === "some-future-model");
+    check("the retried response still streams", text === "recovered", { text, error });
+  }
+  {
+    const { sent, error } = await captureRequests("groq", "m", [
+      { status: 400, body: JSON.stringify({ error: { message: "You exceeded your quota." } }) },
+      { status: 200, body: sseChunk("should not happen") },
+    ]);
+    check("a 400 naming no parameter is not retried", sent.length === 1, sent.length);
+    check("and its message is surfaced", /quota/.test(error ?? ""), error);
+  }
+  {
+    const { sent } = await captureRequests("groq", "m", [
+      { status: 400, body: JSON.stringify({ error: { message: "Unsupported parameter: 'seed'." } }) },
+      { status: 200, body: sseChunk("ok") },
+    ]);
+    check("an unknown parameter we never sent is not retried", sent.length === 1, sent.length);
+  }
+  {
+    const dropped = repairBody({ max_tokens: 1, model: "m" }, "Unsupported parameter: 'max_tokens'.");
+    check("with no suggestion the parameter is dropped, not renamed",
+      dropped !== null && dropped.max_tokens === undefined && dropped.model === "m", dropped);
+  }
+
+  console.log("\n-- server and client capability rules agree --");
+  {
+    let mismatched = 0;
+    for (const provider of ["openai", "groq", "mistral", "anthropic", "together"]) {
+      for (const model of ["gpt-5", "gpt-5-mini", "o1", "o3", "o4-mini", "gpt-4o", "gpt-4.1", "llama-3.3-70b"]) {
+        const a = capabilitiesFor(provider, model);
+        const b = clientCapabilitiesFor(provider, model);
+        if (a.tokenParam !== b.tokenParam || a.sampling !== b.sampling) mismatched++;
+      }
+    }
+    check("the editor and the server classify every combination identically", mismatched === 0, mismatched);
   }
 
   console.log("\n-- environment normalisation --");

@@ -162,6 +162,30 @@ export const PROVIDERS: ProviderMeta[] = [
   },
 ];
 
+/**
+ * Which request shape a model accepts. Mirrors capabilitiesFor() in
+ * api/_lib/llm-stream.ts, which is the authority at request time; the smoke
+ * test asserts the two agree so they cannot drift apart.
+ *
+ * OpenAI's reasoning families take max_completion_tokens instead of
+ * max_tokens, and only the default temperature and top_p.
+ */
+export type ChatCapabilities = {
+  tokenParam: "max_tokens" | "max_completion_tokens";
+  sampling: boolean;
+};
+
+export function capabilitiesFor(providerId: string, modelId: string): ChatCapabilities {
+  if (providerId !== "openai") {
+    return { tokenParam: "max_tokens", sampling: true };
+  }
+  const id = modelId.toLowerCase();
+  const reasoning = /^o\d/.test(id) || /^gpt-5/.test(id);
+  return reasoning
+    ? { tokenParam: "max_completion_tokens", sampling: false }
+    : { tokenParam: "max_tokens", sampling: true };
+}
+
 export function getProvider(id: string): ProviderMeta | undefined {
   return PROVIDERS.find((p) => p.id === id);
 }

@@ -26,6 +26,7 @@ import { ShareModal } from "./ShareModal";
 import { TestPanel } from "./TestPanel";
 import type { AgentAction, Bot, KnowledgeDoc } from "../../lib/types";
 import { TEMPLATES } from "../../lib/templates";
+import { capabilitiesFor } from "../../lib/llm-registry";
 import { initialsFromName } from "../../lib/utils";
 import { beaconSave, removeBot, setBotStatus, updateBot } from "../../lib/bot-store";
 
@@ -525,6 +526,9 @@ function PromptPanel({
   update: <K extends keyof Bot>(k: K, v: Bot[K]) => void;
 }) {
   const [showAdvanced, setShowAdvanced] = React.useState(false);
+  // Some models accept only fixed creativity settings, so the controls for them
+  // would otherwise sit there looking adjustable while doing nothing.
+  const samplingSupported = capabilitiesFor(bot.providerId, bot.modelId).sampling;
 
   return (
     <>
@@ -585,13 +589,22 @@ function PromptPanel({
       </button>
 
       {showAdvanced && (
+        <>
+        {!samplingSupported && (
+          <p className="mt-3 rounded-md border border-border bg-bg/40 px-2.5 py-2 text-xs text-muted">
+            {bot.modelId} uses fixed creativity settings, so Temperature and Top P
+            don't apply. Max tokens still does.
+          </p>
+        )}
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div>
+          <div className={samplingSupported ? "" : "opacity-50"}>
             <Label>Temperature ({bot.temperature.toFixed(2)})</Label>
             <input
               type="range" min={0} max={2} step={0.05} value={bot.temperature}
               onChange={(e) => update("temperature", parseFloat(e.target.value))}
-              className="w-full"
+              disabled={!samplingSupported}
+              title={samplingSupported ? undefined : `${bot.modelId} ignores this setting`}
+              className="w-full disabled:cursor-not-allowed"
             />
           </div>
           <div>
@@ -602,12 +615,14 @@ function PromptPanel({
               min={64} max={8192}
             />
           </div>
-          <div>
+          <div className={samplingSupported ? "" : "opacity-50"}>
             <Label>Top P ({bot.topP.toFixed(2)})</Label>
             <input
               type="range" min={0} max={1} step={0.05} value={bot.topP}
               onChange={(e) => update("topP", parseFloat(e.target.value))}
-              className="w-full"
+              disabled={!samplingSupported}
+              title={samplingSupported ? undefined : `${bot.modelId} ignores this setting`}
+              className="w-full disabled:cursor-not-allowed"
             />
           </div>
           <div>
@@ -631,6 +646,7 @@ function PromptPanel({
             <Input value={bot.language} onChange={(e) => update("language", e.target.value)} />
           </div>
         </div>
+        </>
       )}
     </>
   );

@@ -38,6 +38,36 @@ const OPENAI_COMPAT: Record<string, string> = {
   google: "https://generativelanguage.googleapis.com/v1beta/openai",
 };
 
+/**
+ * Which request shape a model accepts.
+ *
+ * OpenAI's reasoning-era families reject `max_tokens` in favour of
+ * `max_completion_tokens`, and accept only the default `temperature` and
+ * `top_p`. That split is specific to OpenAI: sending `max_completion_tokens`
+ * to Groq, Mistral, DeepSeek or Together would break those instead, so the
+ * rule is scoped to that one provider.
+ *
+ * Matching on the family prefix rather than a list of exact ids means new
+ * members of the o-series and gpt-5 line keep working without an edit here.
+ * Anything this does not know about is caught by the retry in
+ * `streamOpenAICompat`.
+ */
+export type ChatCapabilities = {
+  tokenParam: "max_tokens" | "max_completion_tokens";
+  sampling: boolean;
+};
+
+export function capabilitiesFor(providerId: string, modelId: string): ChatCapabilities {
+  if (providerId !== "openai") {
+    return { tokenParam: "max_tokens", sampling: true };
+  }
+  const id = modelId.toLowerCase();
+  const reasoning = /^o\d/.test(id) || /^gpt-5/.test(id);
+  return reasoning
+    ? { tokenParam: "max_completion_tokens", sampling: false }
+    : { tokenParam: "max_tokens", sampling: true };
+}
+
 export function knownProvider(providerId: string): boolean {
   return providerId === "anthropic" || providerId in OPENAI_COMPAT || providerId === "ollama";
 }
@@ -153,23 +183,44 @@ async function* streamOpenAICompat(
     extraHeaders["X-Title"] = "BotForge";
   }
 
-  const res = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${cfg.providerId === "ollama" ? "ollama" : cfg.apiKey}`,
-      "Content-Type": "application/json",
-      ...extraHeaders,
-    },
-    body: JSON.stringify({
-      model: cfg.modelId,
-      messages: allMessages,
-      stream: true,
-      max_tokens: cfg.maxTokens ?? 1024,
-      temperature: cfg.temperature ?? 0.7,
-      top_p: cfg.topP ?? 1,
-    }),
-    signal,
-  });
+  const caps = capabilitiesFor(cfg.providerId, cfg.modelId);
+  const body: Record<string, unknown> = {
+    model: cfg.modelId,
+    messages: allMessages,
+    stream: true,
+    [caps.tokenParam]: cfg.maxTokens ?? 1024,
+    ...(caps.sampling
+      ? { temperature: cfg.temperature ?? 0.7, top_p: cfg.topP ?? 1 }
+      : {}),
+  };
+
+  const send = (payload: Record<string, unknown>) =>
+    fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${cfg.providerId === "ollama" ? "ollama" : cfg.apiKey}`,
+        "Content-Type": "application/json",
+        ...extraHeaders,
+      },
+      body: JSON.stringify(payload),
+      signal,
+    });
+
+  let res = await send(body);
+
+  // The capability table above cannot stay ahead of every provider. When one
+  // rejects a parameter it names the parameter, and often the replacement, so
+  // take it at its word and try once more. This happens before any bytes are
+  // yielded, so the stream is unaffected.
+  if (res.status === 400) {
+    const raw = await res.text();
+    const repaired = repairBody(body, raw);
+    if (repaired) {
+      res = await send(repaired);
+    } else {
+      throw providerErrorFromBody(raw, res.status, cfg.providerId);
+    }
+  }
 
   if (!res.ok) throw await providerError(res, cfg.providerId);
 
@@ -183,6 +234,45 @@ async function* streamOpenAICompat(
     if (usage) return { t: "usage", in: usage.prompt_tokens, out: usage.completion_tokens };
     return null;
   });
+}
+
+/**
+ * Rewrites a request body from a provider's own complaint about it.
+ *
+ * Returns null when the error names no parameter we can act on, so a genuine
+ * failure is never retried or masked.
+ */
+export function repairBody(
+  body: Record<string, unknown>,
+  errorText: string,
+): Record<string, unknown> | null {
+  const named = /(?:unsupported|unknown|unrecognized|invalid)[^'"`]*['"`]([a-z0-9_.]+)['"`]/i.exec(
+    errorText,
+  );
+  const offending = named?.[1];
+  if (!offending || !(offending in body)) return null;
+
+  // "Use 'max_completion_tokens' instead" -- prefer the replacement it names.
+  const suggested = /use\s+['"`]([a-z0-9_.]+)['"`]\s+instead/i.exec(errorText)?.[1];
+
+  const next = { ...body };
+  const value = next[offending];
+  delete next[offending];
+  if (suggested && !(suggested in next)) next[suggested] = value;
+
+  return next;
+}
+
+function providerErrorFromBody(raw: string, status: number, label: string): ProviderError {
+  let message = `${label} error (${status})`;
+  try {
+    const parsed = JSON.parse(raw) as { error?: { message?: string } | string };
+    if (typeof parsed.error === "string") message = parsed.error;
+    else if (parsed.error?.message) message = parsed.error.message;
+  } catch {
+    if (raw) message = raw.slice(0, 300);
+  }
+  return new ProviderError(message, 502);
 }
 
 async function providerError(res: Response, label: string): Promise<ProviderError> {

@@ -1,4 +1,4 @@
-import { createLocal } from "./local-store";
+import { createBot } from "./bot-store";
 import type { Bot } from "./types";
 
 const EXPORT_VERSION = 1;
@@ -31,7 +31,9 @@ export function exportBots(bots: Bot[]): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export async function importBots(file: File): Promise<Bot[]> {
+export type ImportResult = { created: Bot[]; failed: number };
+
+export async function importBots(file: File): Promise<ImportResult> {
   const text = await file.text();
   let parsed: unknown;
   try {
@@ -55,16 +57,25 @@ export async function importBots(file: File): Promise<Bot[]> {
   }
 
   const created: Bot[] = [];
+  let failed = 0;
   for (const c of candidates) {
-    if (!isBotShape(c)) continue;
+    if (!isBotShape(c)) {
+      failed++;
+      continue;
+    }
     const { id: _id, slug: _slug, createdAt: _ca, updatedAt: _ua, status: _st, ...rest } = c as Bot;
-    const bot = createLocal({ ...rest, status: "DRAFT" });
-    created.push(bot);
+    try {
+      // Sequential on purpose: parallel inserts would race the server-side
+      // slug uniquifier and could collide.
+      created.push(await createBot({ ...rest, status: "DRAFT" }));
+    } catch {
+      failed++;
+    }
   }
   if (created.length === 0) {
     throw new Error("No valid bots found in this file.");
   }
-  return created;
+  return { created, failed };
 }
 
 function isBotShape(x: unknown): boolean {

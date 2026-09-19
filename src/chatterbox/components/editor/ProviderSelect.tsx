@@ -5,11 +5,13 @@ import { Select, Label, Input } from "../ui/Input";
 import { Button } from "../ui/Button";
 import { PROVIDERS } from "../../lib/llm-registry";
 import type { ProviderMeta } from "../../lib/llm-registry";
-import { loadApiKeys, saveApiKey } from "../../lib/api-keys";
+import { listProviderKeys, saveProviderKey } from "../../lib/api-keys";
+import { setAvailableProviders } from "../../lib/llm-registry";
+import { toast } from "../ui/Toast";
 
 type ProviderStatus = ProviderMeta & {
-  serverAvailable: boolean;
-  userKeyed: boolean;
+  /** A key for this provider is stored on the server. */
+  keyed: boolean;
   available: boolean;
 };
 
@@ -46,30 +48,41 @@ export function ProviderSelect({
   const [keysTick, setKeysTick] = React.useState(0);
 
   React.useEffect(() => {
-    const userKeys = loadApiKeys();
-    const merged: ProviderStatus[] = PROVIDERS.map((p) => ({
-      ...p,
-      serverAvailable: false,
-      userKeyed: !!userKeys[p.id],
-      available: !!userKeys[p.id],
-    }));
-    setProviders(merged);
-    setLoading(false);
+    let cancelled = false;
+    setLoading(true);
+    listProviderKeys()
+      .then((keys) => {
+        if (cancelled) return;
+        const keyed = new Set(keys.map((k) => k.providerId));
+        setAvailableProviders(keyed);
+        setProviders(
+          PROVIDERS.map((p) => ({
+            ...p,
+            keyed: keyed.has(p.id),
+            // Ollama needs no key, just a reachable OLLAMA_BASE_URL.
+            available: keyed.has(p.id) || p.id === "ollama",
+          })),
+        );
+      })
+      .catch(() => {
+        // Without the key list, show every provider rather than none.
+        if (!cancelled) {
+          setProviders(PROVIDERS.map((p) => ({ ...p, keyed: false, available: true })));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [keysTick]);
 
+  // Keys can be changed on the Settings page in another tab.
   React.useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === null || e.key === "botforge:apikeys:v1") {
-        setKeysTick((t) => t + 1);
-      }
-    };
-    window.addEventListener("storage", onStorage);
     const onFocus = () => setKeysTick((t) => t + 1);
     window.addEventListener("focus", onFocus);
-    return () => {
-      window.removeEventListener("storage", onStorage);
-      window.removeEventListener("focus", onFocus);
-    };
+    return () => window.removeEventListener("focus", onFocus);
   }, []);
 
   const filtered = showOnlyAvailable
@@ -95,13 +108,13 @@ export function ProviderSelect({
           {filtered.map((p) => (
             <option key={p.id} value={p.id}>
               {availabilityIcon(p)} {p.name}
-              {p.userKeyed ? " (your key)" : ""}
+              {p.keyed ? " (key saved)" : ""}
             </option>
           ))}
         </Select>
-        {currentProvider?.userKeyed && (
+        {currentProvider?.keyed && (
           <p className="mt-1 inline-flex items-center gap-1 text-xs text-accent">
-            <Check size={11} /> Using your saved API key for {currentProvider.name}.
+            <Check size={11} /> Using the saved server key for {currentProvider.name}.
           </p>
         )}
       </div>
@@ -160,7 +173,7 @@ export function ProviderSelect({
         )}
       </div>
 
-      {currentProvider && !currentProvider.userKeyed && providerId !== "ollama" && (
+      {currentProvider && !currentProvider.keyed && providerId !== "ollama" && (
         <InlineKeyForm
           provider={currentProvider}
           onSaved={() => setKeysTick((t) => t + 1)}
@@ -196,9 +209,11 @@ function InlineKeyForm({
     if (!v) return;
     setBusy(true);
     try {
-      saveApiKey(provider.id, v);
+      await saveProviderKey(provider.id, v);
       setValue("");
       onSaved();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save that key.");
     } finally {
       setBusy(false);
     }
@@ -258,7 +273,7 @@ function InlineKeyForm({
 }
 
 function availabilityIcon(p: ProviderStatus): string {
-  if (p.userKeyed) return "🔑";
+  if (p.keyed) return "🔑";
   return "🔴";
 }
 

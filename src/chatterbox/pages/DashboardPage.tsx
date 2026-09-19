@@ -1,38 +1,45 @@
 import * as React from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Copy, Download, MessageSquare, Pencil, Plus, Search, Share2, Trash2, Upload, X } from "lucide-react";
+import { Copy, Download, Loader2, MessageSquare, Pencil, Plus, Search, Share2, Trash2, Upload, X } from "lucide-react";
 import { Avatar } from "../components/ui/Avatar";
 import { toast } from "../components/ui/Toast";
-import { fmtDate } from "../lib/utils";
+import { fmtDate, getSiteUrl } from "../lib/utils";
 import type { Bot } from "../lib/types";
-import { listLocal, removeLocal, createLocal } from "../lib/local-store";
+import { removeBot, createBot, migrateLocalBotsOnce } from "../lib/bot-store";
+import { useBots } from "../lib/use-bot-store";
+import { hasAdminToken, isAuthError } from "../lib/admin-token";
+import { AdminTokenPrompt, ErrorState } from "../components/AdminGate";
+import { ChatterboxNav } from "../components/ChatterboxNav";
 import { exportBots, importBots } from "../lib/bot-io";
-import { encodeBotForShare } from "../lib/share-encode";
+import { PROVIDER_NAMES } from "../lib/llm-registry";
 
-const PROVIDER_NAMES: Record<string, string> = {
-  anthropic: "Anthropic",
-  openai: "OpenAI",
-  google: "Google",
-  mistral: "Mistral",
-  groq: "Groq",
-  xai: "xAI",
-  cohere: "Cohere",
-  perplexity: "Perplexity",
-  deepseek: "DeepSeek",
-  together: "Together AI",
-  openrouter: "OpenRouter",
-  ollama: "Ollama",
-};
 
 export function DashboardPage() {
   const navigate = useNavigate();
-  const [bots, setBots] = React.useState<Bot[] | null>(null);
-  const [tick, setTick] = React.useState(0);
   const [query, setQuery] = React.useState("");
+  const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [hasToken, setHasToken] = React.useState(hasAdminToken);
 
-  React.useEffect(() => {
-    setBots(listLocal());
-  }, [tick]);
+  // Bots created before this app had a server still live in localStorage.
+  // Copy them up once, then read from the server from here on.
+  const migrate = React.useCallback(async () => {
+    try {
+      const result = await migrateLocalBotsOnce();
+      if (result && result.imported > 0) {
+        toast.success(
+          `Moved ${result.imported} ${result.imported === 1 ? "bot" : "bots"} to the cloud. ` +
+            "Your local copy is kept as a backup.",
+        );
+      }
+    } catch {
+      // A failed migration must not stop the dashboard from loading; the bots
+      // stay in localStorage and the next load tries again.
+    }
+  }, []);
+
+  const botsState = useBots(migrate);
+  const bots = botsState.status === "ready" ? botsState.data : null;
+  const refresh = botsState.reload;
 
   const filteredBots = React.useMemo(() => {
     if (!bots) return null;
@@ -44,23 +51,33 @@ export function DashboardPage() {
     });
   }, [bots, query]);
 
-  const refresh = () => setTick((t) => t + 1);
-
-  const onDelete = (b: Bot) => {
+  const onDelete = async (b: Bot) => {
     if (!confirm(`Delete "${b.name}"? This cannot be undone.`)) return;
-    removeLocal(b.id);
-    refresh();
+    setBusyId(b.id);
+    try {
+      await removeBot(b.id);
+      refresh();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not delete that bot.");
+    } finally {
+      setBusyId(null);
+    }
   };
 
-  const onDuplicate = (b: Bot) => {
-    const copy = createLocal({ ...b, name: `${b.name} (copy)`, status: "DRAFT" });
-    refresh();
-    navigate(`/chatterbox/bots/${copy.id}/edit`);
+  const onDuplicate = async (b: Bot) => {
+    setBusyId(b.id);
+    try {
+      // Navigate only once the server has assigned an id.
+      const copy = await createBot({ ...b, name: `${b.name} (copy)`, status: "DRAFT" });
+      navigate(`/chatterbox/bots/${copy.id}/edit`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not duplicate that bot.");
+      setBusyId(null);
+    }
   };
 
   const onShare = (b: Bot) => {
-    const fragment = encodeBotForShare(b);
-    const url = `${window.location.origin}/chatterbox/chat/${b.slug}#${fragment}`;
+    const url = `${getSiteUrl()}/chatterbox/chat/${b.slug}`;
     if (navigator.share) {
       navigator.share({ title: b.name, url }).catch(() => {});
     } else {
@@ -70,9 +87,25 @@ export function DashboardPage() {
     }
   };
 
+  if (!hasToken) {
+    return (
+      <div className="bg-orbs" style={{ minHeight: "100%" }}>
+        <main className="relative mx-auto max-w-6xl px-3 py-16 sm:px-4">
+          <AdminTokenPrompt
+            onSaved={() => {
+              setHasToken(true);
+              refresh();
+            }}
+          />
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-orbs" style={{ minHeight: "100%" }}>
       <main className="relative mx-auto max-w-6xl px-3 py-6 sm:px-4 sm:py-10">
+        <ChatterboxNav />
         <div className="mb-5 flex animate-slide-down flex-col gap-3 sm:mb-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Your Bots</h1>
@@ -142,7 +175,14 @@ export function DashboardPage() {
           </div>
         )}
 
-        {bots === null && (
+        {botsState.status === "error" &&
+          (isAuthError(botsState.message) ? (
+            <AdminTokenPrompt rejected onSaved={refresh} />
+          ) : (
+            <ErrorState message={botsState.message} onRetry={refresh} />
+          ))}
+
+        {botsState.status === "loading" && (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 3 }).map((_, i) => (
               <BotCardSkeleton key={i} index={i} />
@@ -150,7 +190,7 @@ export function DashboardPage() {
           </div>
         )}
 
-        {bots !== null && bots.length === 0 && (
+        {botsState.status === "ready" && bots !== null && bots.length === 0 && (
           <div className="rounded-xl border border-dashed border-border bg-surface p-12 text-center">
             <MessageSquare className="mx-auto mb-3 text-muted" size={28} />
             <h2 className="font-semibold">No bots yet</h2>
@@ -187,8 +227,9 @@ export function DashboardPage() {
                 key={b.id}
                 bot={b}
                 index={i}
-                onDelete={() => onDelete(b)}
-                onDuplicate={() => onDuplicate(b)}
+                busy={busyId === b.id}
+                onDelete={() => void onDelete(b)}
+                onDuplicate={() => void onDuplicate(b)}
                 onShare={() => onShare(b)}
               />
             ))}
@@ -202,12 +243,14 @@ export function DashboardPage() {
 function BotCard({
   bot,
   index,
+  busy,
   onDelete,
   onDuplicate,
   onShare,
 }: {
   bot: Bot;
   index: number;
+  busy?: boolean;
   onDelete: () => void;
   onDuplicate: () => void;
   onShare: () => void;
@@ -263,10 +306,10 @@ function BotCard({
         <CardAction title="Share" onClick={onShare}>
           <Share2 size={13} />
         </CardAction>
-        <CardAction title="Duplicate" onClick={onDuplicate}>
-          <Copy size={13} />
+        <CardAction title="Duplicate" onClick={onDuplicate} disabled={busy}>
+          {busy ? <Loader2 size={13} className="animate-spin" /> : <Copy size={13} />}
         </CardAction>
-        <CardAction title="Delete" onClick={onDelete} danger>
+        <CardAction title="Delete" onClick={onDelete} danger disabled={busy}>
           <Trash2 size={13} />
         </CardAction>
       </div>
@@ -281,6 +324,7 @@ function CardAction({
   onClick,
   danger,
   newTab,
+  disabled,
 }: {
   children: React.ReactNode;
   title: string;
@@ -288,6 +332,7 @@ function CardAction({
   onClick?: () => void;
   danger?: boolean;
   newTab?: boolean;
+  disabled?: boolean;
 }) {
   const cls = `pointer-events-auto grid h-7 w-7 place-items-center rounded-md border border-border bg-surface shadow-sm hover:bg-border/40 ${
     danger ? "hover:text-red-500" : ""
@@ -311,7 +356,8 @@ function CardAction({
       title={title}
       aria-label={title}
       onClick={onClick}
-      className={cls}
+      disabled={disabled}
+      className={`${cls} disabled:cursor-not-allowed disabled:opacity-50`}
     >
       {children}
     </button>
@@ -345,9 +391,13 @@ function ImportButton({ onImported }: { onImported: () => void }) {
 
   const onFile = async (file: File) => {
     try {
-      const bots = await importBots(file);
+      const { created, failed } = await importBots(file);
       onImported();
-      toast.success(`Imported ${bots.length} bot${bots.length === 1 ? "" : "s"}.`);
+      const n = created.length;
+      toast.success(
+        `Imported ${n} bot${n === 1 ? "" : "s"}` +
+          (failed > 0 ? ` — ${failed} could not be imported.` : "."),
+      );
     } catch (e: unknown) {
       toast.error("Import failed: " + ((e as Error)?.message ?? "unknown error"));
     } finally {

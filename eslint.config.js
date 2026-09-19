@@ -23,4 +23,19 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
+  {
+    // Serverless functions and build scripts run on Node, not in the browser.
+    files: ["api/**/*.ts", "scripts/**/*.ts"],
+    languageOptions: { globals: globals.node },
+    rules: {
+      "react-hooks/rules-of-hooks": "off",
+      "react-refresh/only-export-components": "off",
+    },
+  },
+  {
+    // The API smoke test deliberately stubs fetch and fakes request/response
+    // objects, which needs `any`.
+    files: ["scripts/api-smoke-test.ts"],
+    rules: { "@typescript-eslint/no-explicit-any": "off" },
+  },
 );

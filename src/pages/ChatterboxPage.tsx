@@ -1,7 +1,13 @@
+import { useLocation } from 'react-router-dom';
 import NavBar from '@/components/NavBar';
 import { ChatterboxApp } from '@/chatterbox/ChatterboxApp';
 
 const ChatterboxPage = () => {
+  // An embedded bot is rendered inside someone else's page, so it must not
+  // carry this site's navigation with it.
+  const { search } = useLocation();
+  const embedded = new URLSearchParams(search).get('embed') === '1';
+
   return (
     <div className="h-screen flex flex-col bg-black text-white overflow-hidden">
       {/* Ambient background */}
@@ -18,7 +24,7 @@ const ChatterboxPage = () => {
       </div>
 
       <div className="relative z-10 flex flex-col h-full">
-        <NavBar />
+        {!embedded && <NavBar />}
 
         <div className="flex-1 overflow-auto">
           <ChatterboxApp />

@@ -2,6 +2,9 @@ export type BotStatus = "DRAFT" | "PUBLISHED" | "UNPUBLISHED" | "ARCHIVED";
 export type BotVisibility = "public" | "unlisted" | "private";
 export type ContentFilterLevel = "strict" | "moderate" | "off";
 export type MemoryMode = "none" | "session" | "persistent";
+/** What a bot is allowed to do automatically when "Act as an Agent" is on. */
+export type AgentAction = "lead_magnet" | "scheduler";
+
 export type ChatTheme =
   | "default"
   | "bubble"
@@ -33,6 +36,9 @@ export type Bot = {
 
   chatTheme: ChatTheme;
 
+  agentEnabled: boolean;
+  agentActions: AgentAction[];
+
   visibility: BotVisibility;
   status: BotStatus;
   contentFilter: ContentFilterLevel;
@@ -46,6 +52,30 @@ export type Bot = {
 
   knowledge: KnowledgeDoc[];
 };
+
+/**
+ * What a visitor's browser is allowed to know about a bot.
+ *
+ * Deliberately excludes systemPrompt, knowledge, providerId, modelId and the
+ * sampling settings: those stay on the server, which is the whole point of
+ * routing chat through /api/bot-chat rather than calling providers directly.
+ */
+export type PublicBot = Pick<
+  Bot,
+  | "id"
+  | "slug"
+  | "name"
+  | "bio"
+  | "description"
+  | "avatarUrl"
+  | "avatarInitials"
+  | "themeColor"
+  | "greeting"
+  | "starterPrompts"
+  | "chatTheme"
+  | "tags"
+  | "language"
+>;
 
 export type KnowledgeDoc = {
   id: string;

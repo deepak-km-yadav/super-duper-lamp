@@ -1,11 +1,66 @@
+/**
+ * Provider API keys, stored on the server.
+ *
+ * These used to live in localStorage and were sent straight from the browser to
+ * the provider. That is why an embedded bot never replied for a visitor -- they
+ * had no key -- and it meant the key was readable by anything running on the
+ * page. Keys now go to /api/provider-keys and come back only as masked hints.
+ */
+
 import type { ApiKeyMap } from "./types";
+import { getAdminToken } from "./admin-token";
 
-const KEY = "botforge:apikeys:v1";
+export type ProviderKeyInfo = { providerId: string; hint: string };
 
-export function loadApiKeys(): ApiKeyMap {
+async function request<T>(init: RequestInit & { url?: string }): Promise<T> {
+  const res = await fetch(init.url ?? "/api/provider-keys", {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      "x-admin-token": getAdminToken(),
+      ...(init.headers as Record<string, string> | undefined),
+    },
+  });
+  const text = await res.text();
+  const body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  if (!res.ok) {
+    throw new Error(
+      typeof body.error === "string" ? body.error : `Request failed (${res.status})`,
+    );
+  }
+  return body as T;
+}
+
+export async function listProviderKeys(): Promise<ProviderKeyInfo[]> {
+  const { keys } = await request<{ keys: ProviderKeyInfo[] }>({ method: "GET" });
+  return keys ?? [];
+}
+
+export async function saveProviderKey(providerId: string, apiKey: string): Promise<void> {
+  await request({ method: "PUT", body: JSON.stringify({ providerId, apiKey }) });
+}
+
+export async function deleteProviderKey(providerId: string): Promise<void> {
+  await request({
+    method: "DELETE",
+    url: `/api/provider-keys?providerId=${encodeURIComponent(providerId)}`,
+  });
+}
+
+export function maskKey(key: string): string {
+  if (!key) return "";
+  if (key.length <= 8) return "•".repeat(key.length);
+  return `${key.slice(0, 4)}…${key.slice(-4)}`;
+}
+
+// --- Legacy localStorage keys, read only so they can be offered for upload ---
+
+const LEGACY_KEY = "botforge:apikeys:v1";
+
+export function loadLegacyApiKeys(): ApiKeyMap {
   if (typeof window === "undefined") return {};
   try {
-    const raw = window.localStorage.getItem(KEY);
+    const raw = window.localStorage.getItem(LEGACY_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === "object" ? (parsed as ApiKeyMap) : {};
@@ -14,23 +69,10 @@ export function loadApiKeys(): ApiKeyMap {
   }
 }
 
-export function saveApiKey(providerId: string, value: string) {
-  const all = loadApiKeys();
-  if (value) all[providerId] = value;
-  else delete all[providerId];
+export function clearLegacyApiKeys(): void {
   try {
-    window.localStorage.setItem(KEY, JSON.stringify(all));
-  } catch (e) {
-    console.warn("[api-keys] save failed", e);
+    window.localStorage.removeItem(LEGACY_KEY);
+  } catch {
+    // Nothing to do; the keys are simply left in place.
   }
-}
-
-export function clearApiKey(providerId: string) {
-  saveApiKey(providerId, "");
-}
-
-export function maskKey(key: string): string {
-  if (!key) return "";
-  if (key.length <= 8) return "•".repeat(key.length);
-  return key.slice(0, 4) + "•".repeat(Math.max(4, key.length - 8)) + key.slice(-4);
 }

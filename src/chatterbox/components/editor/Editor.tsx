@@ -24,12 +24,31 @@ import { KnowledgeUpload } from "./KnowledgeUpload";
 import { ProviderSelect } from "./ProviderSelect";
 import { ShareModal } from "./ShareModal";
 import { TestPanel } from "./TestPanel";
-import type { Bot, KnowledgeDoc } from "../../lib/types";
+import type { AgentAction, Bot, KnowledgeDoc } from "../../lib/types";
 import { TEMPLATES } from "../../lib/templates";
 import { initialsFromName } from "../../lib/utils";
-import { removeLocal, setLocalStatus, updateLocal } from "../../lib/local-store";
+import { beaconSave, removeBot, setBotStatus, updateBot } from "../../lib/bot-store";
 
 type Tab = "identity" | "brain" | "test";
+
+/**
+ * Only send what actually changed.
+ *
+ * The whole Bot is not a viable request body: avatarUrl is a base64 data URI
+ * and knowledge documents run to hundreds of KB, so re-posting the object on
+ * every 800ms debounce would push megabytes per keystroke burst.
+ */
+function diffBot(prev: Bot, next: Bot): Partial<Bot> {
+  const patch: Partial<Bot> = {};
+  for (const key of Object.keys(next) as (keyof Bot)[]) {
+    const a = prev[key];
+    const b = next[key];
+    const changed =
+      typeof b === "object" && b !== null ? JSON.stringify(a) !== JSON.stringify(b) : a !== b;
+    if (changed) (patch as Record<string, unknown>)[key] = b;
+  }
+  return patch;
+}
 
 export function Editor({ initialBot, siteUrl }: { initialBot: Bot; siteUrl: string }) {
   const navigate = useNavigate();
@@ -44,42 +63,134 @@ export function Editor({ initialBot, siteUrl }: { initialBot: Bot; siteUrl: stri
     setBot((prev) => ({ ...prev, [key]: value }));
   }, []);
 
+  // Saving is now a network round trip rather than a synchronous localStorage
+  // write, which introduces three problems the old code did not have: saves can
+  // land out of order, an unmount can drop the last edit, and a save can fail.
+  const pendingRef = React.useRef<Bot | null>(null);
+  const inFlightRef = React.useRef<Promise<unknown> | null>(null);
+  const seqRef = React.useRef(0);
+  const lastSavedRef = React.useRef<Bot>(initialBot);
+
+  const flush = React.useCallback(async () => {
+    const snapshot = pendingRef.current;
+    if (!snapshot) return;
+
+    // Serialise: never have two saves for the same bot in flight at once.
+    if (inFlightRef.current) await inFlightRef.current.catch(() => {});
+    if (pendingRef.current !== snapshot) return; // a newer edit owns the next flush
+
+    const patch = diffBot(lastSavedRef.current, snapshot);
+    if (Object.keys(patch).length === 0) {
+      pendingRef.current = null;
+      setSaved("idle");
+      return;
+    }
+
+    const seq = ++seqRef.current;
+    const p = updateBot(snapshot.id, patch)
+      .then((savedBot) => {
+        if (seq !== seqRef.current) return; // superseded by a later save
+        pendingRef.current = null;
+        lastSavedRef.current = savedBot;
+        // Reconcile server-owned fields without stomping on in-flight typing.
+        setBot((prev) =>
+          prev === snapshot
+            ? savedBot
+            : { ...prev, slug: savedBot.slug, updatedAt: savedBot.updatedAt },
+        );
+        setSaved("saved");
+        setTimeout(() => setSaved("idle"), 1200);
+      })
+      .catch((e: unknown) => {
+        setSaved("error");
+        toast.error(e instanceof Error ? e.message : "Save failed.");
+      })
+      .finally(() => {
+        if (inFlightRef.current === p) inFlightRef.current = null;
+      });
+
+    inFlightRef.current = p;
+    await p;
+  }, []);
+
   React.useEffect(() => {
     if (isInitialMount.current) {
       isInitialMount.current = false;
       return;
     }
     setSaved("saving");
-    const t = setTimeout(() => {
-      updateLocal(bot.id, bot);
-      setSaved("saved");
-      setTimeout(() => setSaved("idle"), 1200);
-    }, 800);
+    pendingRef.current = bot;
+    const t = setTimeout(() => void flush(), 800);
     return () => clearTimeout(t);
-  }, [bot]);
+  }, [bot, flush]);
 
-  const publish = () => {
+  // A fetch started during unmount is cancelled by the browser on navigation,
+  // so the last debounced edit goes out via sendBeacon instead.
+  React.useEffect(() => {
+    return () => {
+      const pending = pendingRef.current;
+      if (!pending) return;
+      const patch = diffBot(lastSavedRef.current, pending);
+      if (Object.keys(patch).length > 0) beaconSave(pending.id, patch);
+    };
+  }, []);
+
+  // Warn before a reload or tab close drops an unsaved edit.
+  React.useEffect(() => {
+    if (saved !== "saving" && saved !== "error") return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [saved]);
+
+  const [publishing, setPublishing] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+
+  const publish = async () => {
+    if (publishing) return;
     const goingLive = bot.status !== "PUBLISHED";
+    const previous = bot;
     const next: Bot = {
       ...bot,
       status: goingLive ? "PUBLISHED" : "UNPUBLISHED",
       publishedAt: goingLive ? new Date().toISOString() : bot.publishedAt,
     };
-    setLocalStatus(bot.id, next.status);
-    updateLocal(bot.id, next);
+
+    setPublishing(true);
     setBot(next);
-    if (goingLive) {
-      setShowShare(true);
-      toast.success("Bot published! Share your link.");
-    } else {
-      toast.info("Bot unpublished.");
+    try {
+      // Flush any pending edits first, so publishing never races the autosave
+      // and ships a stale prompt to the public page.
+      await flush();
+      const savedBot = await setBotStatus(bot.id, next.status, next.publishedAt);
+      lastSavedRef.current = savedBot;
+      setBot(savedBot);
+      if (goingLive) {
+        setShowShare(true);
+        toast.success("Bot published! Share your link.");
+      } else {
+        toast.info("Bot unpublished.");
+      }
+    } catch (e) {
+      setBot(previous); // roll back the optimistic status flip
+      toast.error(e instanceof Error ? e.message : "Could not change publish status.");
+    } finally {
+      setPublishing(false);
     }
   };
 
-  const remove = () => {
+  const remove = async () => {
+    if (deleting) return;
     if (!confirm("Delete this bot? This cannot be undone.")) return;
-    removeLocal(bot.id);
-    navigate("/chatterbox/dashboard");
+    setDeleting(true);
+    try {
+      await removeBot(bot.id);
+      pendingRef.current = null; // nothing left to beacon on unmount
+      navigate("/chatterbox/dashboard");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not delete that bot.");
+      setDeleting(false);
+    }
   };
 
   return (
@@ -87,9 +198,12 @@ export function Editor({ initialBot, siteUrl }: { initialBot: Bot; siteUrl: stri
       <Header
         bot={bot}
         saved={saved}
-        onPublish={publish}
+        onPublish={() => void publish()}
         onShare={() => setShowShare(true)}
-        onDelete={remove}
+        onDelete={() => void remove()}
+        onRetrySave={() => void flush()}
+        publishing={publishing}
+        deleting={deleting}
         siteUrl={siteUrl}
       />
 
@@ -173,6 +287,9 @@ function Header({
   onPublish,
   onShare,
   onDelete,
+  onRetrySave,
+  publishing,
+  deleting,
   siteUrl,
 }: {
   bot: Bot;
@@ -180,6 +297,9 @@ function Header({
   onPublish: () => void;
   onShare: () => void;
   onDelete: () => void;
+  onRetrySave: () => void;
+  publishing?: boolean;
+  deleting?: boolean;
   siteUrl: string;
 }) {
   return (
@@ -217,7 +337,7 @@ function Header({
           className="ml-0.5"
         />
         <span className="truncate font-medium">{bot.name}</span>
-        <SavedIndicator state={saved} />
+        <SavedIndicator state={saved} onRetry={onRetrySave} />
       </div>
 
       <div className="flex shrink-0 items-center gap-1">
@@ -231,14 +351,22 @@ function Header({
             View live <ExternalLink size={11} />
           </a>
         )}
-        <Button variant="ghost" size="sm" onClick={onDelete} aria-label="Delete">
-          <Trash2 size={14} />
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={onDelete}
+          disabled={deleting}
+          aria-label="Delete"
+        >
+          {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
         </Button>
         <Button variant="secondary" size="sm" onClick={onShare} aria-label="Share">
           <Share2 size={14} /> <span className="hidden sm:inline">Share</span>
         </Button>
-        <Button size="sm" onClick={onPublish}>
-          {bot.status === "PUBLISHED" ? (
+        <Button size="sm" onClick={onPublish} disabled={publishing}>
+          {publishing ? (
+            <Loader2 size={14} className="animate-spin" />
+          ) : bot.status === "PUBLISHED" ? (
             <>
               <span className="hidden sm:inline">Unpublish</span>
               <span className="sm:hidden">Live</span>
@@ -252,7 +380,13 @@ function Header({
   );
 }
 
-function SavedIndicator({ state }: { state: "idle" | "saving" | "saved" | "error" }) {
+function SavedIndicator({
+  state,
+  onRetry,
+}: {
+  state: "idle" | "saving" | "saved" | "error";
+  onRetry: () => void;
+}) {
   if (state === "idle") return null;
   return (
     <span className="ml-2 inline-flex items-center gap-1 text-xs text-muted">
@@ -262,7 +396,18 @@ function SavedIndicator({ state }: { state: "idle" | "saving" | "saved" | "error
       {state === "saved" && (
         <><Check size={11} className="text-green-500" /> Saved</>
       )}
-      {state === "error" && <span className="text-red-500">Save failed</span>}
+      {state === "error" && (
+        <>
+          <span className="text-red-500">Save failed</span>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="underline underline-offset-2 hover:text-fg"
+          >
+            Retry
+          </button>
+        </>
+      )}
     </span>
   );
 }
@@ -426,6 +571,10 @@ function PromptPanel({
         />
       </div>
 
+      <div className="mt-6">
+        <AgentPanel bot={bot} update={update} />
+      </div>
+
       <button
         onClick={() => setShowAdvanced((v) => !v)}
         className="mt-6 inline-flex items-center gap-1.5 text-xs font-medium text-muted hover:text-fg"
@@ -484,6 +633,106 @@ function PromptPanel({
         </div>
       )}
     </>
+  );
+}
+
+const AGENT_ACTIONS: {
+  id: AgentAction;
+  label: string;
+  description: string;
+}[] = [
+  {
+    id: "lead_magnet",
+    label: "Lead Magnet",
+    description:
+      "Detects when a name, email or phone number comes up in chat and saves it as a lead.",
+  },
+  {
+    id: "scheduler",
+    label: "Scheduler",
+    description:
+      "Detects a requested date and time and saves it as a meeting request.",
+  },
+];
+
+/**
+ * "Act as an Agent" -- lets the bot do something with a conversation beyond
+ * replying to it. Everything captured shows up on the Action Items page.
+ */
+function AgentPanel({
+  bot,
+  update,
+}: {
+  bot: Bot;
+  update: <K extends keyof Bot>(key: K, value: Bot[K]) => void;
+}) {
+  const enabled = bot.agentEnabled ?? false;
+  const actions = bot.agentActions ?? [];
+
+  const toggleAction = (id: AgentAction, on: boolean) => {
+    const next = on ? [...new Set([...actions, id])] : actions.filter((a) => a !== id);
+    update("agentActions", next);
+  };
+
+  return (
+    <div className="rounded-lg border border-border bg-bg/40 p-3">
+      <label className="flex cursor-pointer items-start gap-3">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(e) => update("agentEnabled", e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded"
+        />
+        <span className="min-w-0">
+          <span className="flex items-center gap-1.5 text-sm font-medium">
+            <Sparkles size={13} className="text-accent" /> Act as an Agent
+          </span>
+          <span className="mt-0.5 block text-xs text-muted">
+            Let this bot act on the conversation, not just reply to it.
+          </span>
+        </span>
+      </label>
+
+      {enabled && (
+        <div className="mt-3 space-y-2 border-t border-border pt-3">
+          <p className="text-xs font-medium text-muted">What should it do?</p>
+          {AGENT_ACTIONS.map((action) => (
+            <label
+              key={action.id}
+              className="flex cursor-pointer items-start gap-3 rounded-md p-2 hover:bg-border/30"
+            >
+              <input
+                type="checkbox"
+                checked={actions.includes(action.id)}
+                onChange={(e) => toggleAction(action.id, e.target.checked)}
+                className="mt-0.5 h-4 w-4 shrink-0 rounded"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">{action.label}</span>
+                <span className="mt-0.5 block text-xs text-muted">
+                  {action.description}
+                </span>
+              </span>
+            </label>
+          ))}
+
+          {actions.length === 0 ? (
+            <p className="rounded-md border border-yellow-500/30 bg-yellow-500/5 px-2 py-1.5 text-xs text-yellow-600">
+              Pick at least one action, or the bot will behave exactly as before.
+            </p>
+          ) : (
+            <p className="text-xs text-muted">
+              Captured items appear under{" "}
+              <Link to="/chatterbox/action-items" className="text-accent hover:underline">
+                Action Items
+              </Link>
+              . The bot will also be nudged to ask for these details naturally
+              rather than only listening for them.
+            </p>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

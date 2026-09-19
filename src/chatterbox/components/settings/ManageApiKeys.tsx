@@ -1,60 +1,107 @@
 import * as React from "react";
-import { Check, Eye, EyeOff, KeyRound, X } from "lucide-react";
+import { Check, KeyRound, Loader2, Upload, X } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Input } from "../ui/Input";
-import { loadApiKeys, saveApiKey, clearApiKey } from "../../lib/api-keys";
-import { PROVIDERS } from "../../lib/llm-registry";
+import { toast } from "../ui/Toast";
+import {
+  listProviderKeys,
+  saveProviderKey,
+  deleteProviderKey,
+  loadLegacyApiKeys,
+  clearLegacyApiKeys,
+} from "../../lib/api-keys";
+import { PROVIDERS, setAvailableProviders } from "../../lib/llm-registry";
 import { cn } from "../../lib/utils";
 
-type ProviderRow = {
-  id: string;
-  name: string;
-  envKey: string;
-  userKeyed: boolean;
-};
-
 export function ManageApiKeys() {
-  const [providers, setProviders] = React.useState<ProviderRow[]>([]);
-  const [keys, setKeys] = React.useState<Record<string, string>>({});
-  const [reveal, setReveal] = React.useState<Record<string, boolean>>({});
+  const [hints, setHints] = React.useState<Record<string, string>>({});
+  const [drafts, setDrafts] = React.useState<Record<string, string>>({});
+  const [busy, setBusy] = React.useState<Record<string, boolean>>({});
   const [savedTick, setSavedTick] = React.useState<Record<string, number>>({});
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [legacyCount, setLegacyCount] = React.useState(0);
+  const [uploading, setUploading] = React.useState(false);
 
-  const load = () => {
-    const stored = loadApiKeys() as Record<string, string>;
-    const rows: ProviderRow[] = PROVIDERS.map((p) => ({
-      id: p.id,
-      name: p.name,
-      envKey: p.envKey,
-      userKeyed: !!stored[p.id],
-    }));
-    setProviders(rows);
-    setKeys(stored);
-  };
-
-  React.useEffect(() => {
-    load();
+  const load = React.useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const keys = await listProviderKeys();
+      const next: Record<string, string> = {};
+      for (const k of keys) next[k.providerId] = k.hint;
+      setHints(next);
+      // Let the rest of the app show which providers are actually usable.
+      setAvailableProviders(Object.keys(next));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load your keys.");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const update = (providerId: string, value: string) => {
-    setKeys((prev) => ({ ...prev, [providerId]: value }));
+  React.useEffect(() => {
+    void load();
+    setLegacyCount(Object.keys(loadLegacyApiKeys()).length);
+  }, [load]);
+
+  const onSave = async (providerId: string) => {
+    const value = (drafts[providerId] || "").trim();
+    if (!value) return;
+    setBusy((b) => ({ ...b, [providerId]: true }));
+    try {
+      await saveProviderKey(providerId, value);
+      setDrafts((d) => ({ ...d, [providerId]: "" }));
+      setSavedTick((p) => ({ ...p, [providerId]: Date.now() }));
+      setTimeout(() => setSavedTick((p) => ({ ...p, [providerId]: 0 })), 1500);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save that key.");
+    } finally {
+      setBusy((b) => ({ ...b, [providerId]: false }));
+    }
   };
 
-  const onSave = (providerId: string) => {
-    const v = (keys[providerId] || "").trim();
-    saveApiKey(providerId, v);
-    setSavedTick((p) => ({ ...p, [providerId]: Date.now() }));
-    setTimeout(() => setSavedTick((p) => ({ ...p, [providerId]: 0 })), 1500);
-    setProviders((prev) =>
-      prev.map((p) => (p.id === providerId ? { ...p, userKeyed: !!v } : p)),
-    );
+  const onClear = async (providerId: string) => {
+    setBusy((b) => ({ ...b, [providerId]: true }));
+    try {
+      await deleteProviderKey(providerId);
+      setDrafts((d) => ({ ...d, [providerId]: "" }));
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not remove that key.");
+    } finally {
+      setBusy((b) => ({ ...b, [providerId]: false }));
+    }
   };
 
-  const onClear = (providerId: string) => {
-    clearApiKey(providerId);
-    setKeys((prev) => ({ ...prev, [providerId]: "" }));
-    setProviders((prev) =>
-      prev.map((p) => (p.id === providerId ? { ...p, userKeyed: false } : p)),
-    );
+  /** Offered, never automatic: uploading a key is the user's decision. */
+  const uploadLegacy = async () => {
+    const legacy = loadLegacyApiKeys();
+    const entries = Object.entries(legacy).filter(([, v]) => Boolean(v));
+    if (entries.length === 0) return;
+    setUploading(true);
+    let moved = 0;
+    try {
+      for (const [providerId, value] of entries) {
+        try {
+          await saveProviderKey(providerId, String(value));
+          moved++;
+        } catch {
+          // Keep going; report the total at the end.
+        }
+      }
+      if (moved > 0) {
+        clearLegacyApiKeys();
+        setLegacyCount(0);
+        toast.success(`Moved ${moved} key${moved === 1 ? "" : "s"} to the server.`);
+        await load();
+      } else {
+        toast.error("Could not move those keys.");
+      }
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
@@ -66,17 +113,42 @@ export function ManageApiKeys() {
         <div>
           <h2 className="text-lg font-semibold">Manage API keys</h2>
           <p className="mt-0.5 text-sm text-muted">
-            Bring your own keys. Stored in <strong>this browser only</strong>, sent
-            per-request directly to the AI provider. Keys never leave your browser
-            except as part of a direct chat request.
+            Bring your own keys. Stored on the server and used to answer chats on
+            your behalf, so people who open your published bot or your embed
+            don't need a key of their own. A saved key is never sent back to the
+            browser — you'll only see the last few characters.
           </p>
         </div>
       </div>
 
+      {legacyCount > 0 && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-accent/30 bg-accent/5 p-3 text-sm">
+          <span>
+            You have {legacyCount} key{legacyCount === 1 ? "" : "s"} saved in this
+            browser from before. Move {legacyCount === 1 ? "it" : "them"} to the
+            server so your published bots can use {legacyCount === 1 ? "it" : "them"}.
+          </span>
+          <Button size="sm" onClick={() => void uploadLegacy()} disabled={uploading}>
+            {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+            Move to server
+          </Button>
+        </div>
+      )}
+
+      {error && (
+        <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-500">
+          {error}{" "}
+          <button onClick={() => void load()} className="underline hover:text-fg">
+            Retry
+          </button>
+        </div>
+      )}
+
       <div className="space-y-2">
-        {providers.map((p) => {
-          const v = keys[p.id] || "";
-          const isRevealed = reveal[p.id];
+        {PROVIDERS.map((p) => {
+          const hint = hints[p.id];
+          const draft = drafts[p.id] || "";
+          const isBusy = busy[p.id];
           return (
             <div
               key={p.id}
@@ -87,45 +159,43 @@ export function ManageApiKeys() {
                   <span
                     className={cn(
                       "h-1.5 w-1.5 rounded-full",
-                      p.userKeyed ? "bg-accent" : "bg-red-500",
+                      hint ? "bg-accent" : "bg-red-500",
                     )}
                   />
                   {p.name}
                 </div>
-                <div className="font-mono text-[10px] text-muted">{p.envKey}</div>
+                <div className="font-mono text-[10px] text-muted">
+                  {hint ? `Saved · ${hint}` : p.envKey}
+                </div>
               </div>
-              <div className="flex items-center gap-1">
-                <Input
-                  type={isRevealed ? "text" : "password"}
-                  value={v}
-                  onChange={(e) => update(p.id, e.target.value)}
-                  placeholder="Paste key…"
-                  className="font-mono text-[16px] sm:text-xs"
-                  autoComplete="off"
-                  spellCheck={false}
-                />
-                <button
-                  type="button"
-                  onClick={() => setReveal((r) => ({ ...r, [p.id]: !isRevealed }))}
-                  className="grid h-10 w-9 place-items-center rounded-md text-muted hover:bg-border/40 hover:text-fg"
-                  title={isRevealed ? "Hide" : "Reveal"}
-                  aria-label={isRevealed ? "Hide key" : "Reveal key"}
-                >
-                  {isRevealed ? <EyeOff size={14} /> : <Eye size={14} />}
-                </button>
-              </div>
+              <Input
+                type="password"
+                value={draft}
+                onChange={(e) => setDrafts((d) => ({ ...d, [p.id]: e.target.value }))}
+                placeholder={hint ? "Paste a new key to replace…" : "Paste key…"}
+                className="font-mono text-[16px] sm:text-xs"
+                autoComplete="off"
+                spellCheck={false}
+                disabled={loading}
+              />
               <div className="flex flex-wrap items-center justify-end gap-1.5">
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => onClear(p.id)}
-                  disabled={!v && !p.userKeyed}
-                  aria-label="Clear key"
+                  onClick={() => void onClear(p.id)}
+                  disabled={!hint || isBusy}
+                  aria-label={`Remove ${p.name} key`}
                 >
                   <X size={14} />
                 </Button>
-                <Button size="sm" onClick={() => onSave(p.id)} disabled={!v}>
-                  {savedTick[p.id] ? (
+                <Button
+                  size="sm"
+                  onClick={() => void onSave(p.id)}
+                  disabled={!draft.trim() || isBusy}
+                >
+                  {isBusy ? (
+                    <Loader2 size={12} className="animate-spin" />
+                  ) : savedTick[p.id] ? (
                     <>
                       <Check size={12} /> Saved
                     </>
@@ -140,8 +210,8 @@ export function ManageApiKeys() {
       </div>
 
       <p className="mt-4 text-xs text-muted">
-        Keys are stored only in your browser's localStorage. Clear the field and click
-        Save (or the ✕ button) to remove a key.
+        Use the ✕ button to remove a key. Removing the key for a provider stops
+        every published bot using that provider from replying.
       </p>
     </div>
   );

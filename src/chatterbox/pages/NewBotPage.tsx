@@ -5,7 +5,7 @@ import { Button } from "../components/ui/Button";
 import { Input, Label } from "../components/ui/Input";
 import { TEMPLATES } from "../lib/templates";
 import { initialsFromName } from "../lib/utils";
-import { createLocal } from "../lib/local-store";
+import { createBot } from "../lib/bot-store";
 
 export function NewBotPage() {
   const navigate = useNavigate();
@@ -17,12 +17,12 @@ export function NewBotPage() {
 
   const tpl = TEMPLATES.find((t) => t.id === templateId)!;
 
-  const create = () => {
-    if (!name.trim()) return;
+  const create = async () => {
+    if (!name.trim() || busy) return;
     setBusy(true);
     setError(null);
     try {
-      const bot = createLocal({
+      const bot = await createBot({
         name: name.trim(),
         bio: bio.trim(),
         systemPrompt: tpl.systemPrompt,
@@ -32,6 +32,8 @@ export function NewBotPage() {
         tags: tpl.tags,
         avatarInitials: initialsFromName(name),
       });
+      // Deliberately no setBusy(false) on success: the button stays disabled
+      // until this page unmounts, so a double click cannot create two bots.
       navigate(`/chatterbox/bots/${bot.id}/edit`);
     } catch (e: unknown) {
       setError((e as Error)?.message ?? "Failed to create bot");
@@ -108,7 +110,7 @@ export function NewBotPage() {
           )}
 
           <div className="flex justify-end">
-            <Button onClick={create} disabled={!name.trim() || busy}>
+            <Button onClick={() => void create()} disabled={!name.trim() || busy}>
               {busy ? "Creating…" : "Continue"} <ArrowRight size={14} />
             </Button>
           </div>

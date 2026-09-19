@@ -126,10 +126,16 @@ reach Supabase at all. `/api/health` reports the specific reason — most often
 `SUPABASE_URL` has a typo, or the Supabase project is paused (free projects
 pause after a period of inactivity and must be resumed from the dashboard).
 
-Leading and trailing whitespace, wrapping quotes, a trailing slash and a
-`/rest/v1` suffix on `SUPABASE_URL` are all corrected automatically and
-reported under `warnings`. A missing `https://` prefix is not recoverable and
-is reported as an error.
+Leading and trailing whitespace, wrapping quotes, a trailing slash, a
+`/rest/v1` suffix, and a value accidentally pasted twice are all corrected
+automatically on `SUPABASE_URL` and reported under `warnings`. A missing
+`https://` prefix is not recoverable and is reported as an error.
+
+A doubled value is worth knowing about: pasting into a field that already holds
+a value appends rather than replaces, producing
+`https://x.supabase.cohttps://x.supabase.co`. That parses without complaint —
+the host simply becomes `x.supabase.cohttps` — so the only symptom is a DNS
+failure for a hostname nobody typed.
 
 `LEADS_DASHBOARD_TOKEN` grants access to the legacy `/leads` page only. It used
 to double as a BotForge admin token, which meant the old leads password could

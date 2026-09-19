@@ -16,7 +16,7 @@ import botsHandler from "../api/bots";
 import publicHandler from "../api/bot-public";
 import keysHandler from "../api/provider-keys";
 import { detectSignals, buildContextSnippet } from "../api/_lib/detect";
-import { readEnv, readEnvUrl, describeFetchFailure } from "../api/_lib/env";
+import { readEnv, readEnvUrl, describeFetchFailure, hasRepeatedUrl } from "../api/_lib/env";
 import actionItemsHandler from "../api/action-items";
 import healthHandler from "../api/health";
 import { apiFetchForTest } from "./api-client-helper";
@@ -407,6 +407,18 @@ async function run() {
     check("leaves a clean value alone", readEnvUrl(url) === url);
     check("handles undefined", readEnvUrl(undefined) === "");
     check("readEnv keeps inner characters", readEnv('  "sk-ant-a/b+c="  ') === "sk-ant-a/b+c=");
+
+    // Pasting into a field that already holds a value appends rather than
+    // replaces, which parses fine but resolves a host nobody typed.
+    const doubled = `${url}${url}`;
+    check("keeps only the first of two concatenated URLs", readEnvUrl(doubled) === url, readEnvUrl(doubled));
+    check("keeps only the first of two space-separated URLs",
+      readEnvUrl(`${url} ${url}`) === url, readEnvUrl(`${url} ${url}`));
+    check("flags a repeated URL", hasRepeatedUrl(doubled));
+    check("does not flag a single URL", !hasRepeatedUrl(url));
+    check("does not flag a quoted single URL", !hasRepeatedUrl(`"${url}"`));
+    check("a path is not mistaken for a second URL",
+      readEnvUrl("https://x.supabase.co/some/path") === "https://x.supabase.co/some/path");
   }
 
   console.log("\n-- connection failures are explained --");
@@ -426,6 +438,13 @@ async function run() {
     check("DNS failure names the host", /gone\.supabase\.co/.test(dns), dns);
     check("DNS failure mentions a paused project", /paused/.test(dns), dns);
     check("DNS failure is not the bare undici message", dns !== "fetch failed", dns);
+
+    const doubledHost = describeFetchFailure(
+      Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } }),
+      "https://glklfuuleyachujtajwn.supabase.cohttps",
+    );
+    check("a doubled URL is named as such, not called a typo",
+      /two URLs run together/.test(doubledHost), doubledHost);
 
     const timeout = describeFetchFailure(
       Object.assign(new TypeError("fetch failed"), { cause: { code: "ETIMEDOUT" } }),

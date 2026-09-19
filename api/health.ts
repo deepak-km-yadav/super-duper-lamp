@@ -12,7 +12,7 @@
  */
 
 import { applyCors, header, type ApiRequest, type ApiResponse } from "./_lib/http.js";
-import { readEnv, readEnvUrl, describeFetchFailure } from "./_lib/env.js";
+import { readEnv, readEnvUrl, describeFetchFailure, hasRepeatedUrl } from "./_lib/env.js";
 import {
   isAdminToken,
   isAdminConfigured,
@@ -138,6 +138,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
   }
   if (/\/rest\/v1\/?$/.test(rawUrl.trim())) {
     warnings.push("SUPABASE_URL includes /rest/v1 (corrected automatically).");
+  }
+  if (hasRepeatedUrl(rawUrl)) {
+    warnings.push(
+      "SUPABASE_URL contained more than one URL — it was probably pasted on top " +
+        "of an existing value. Only the first was used; fix the variable.",
+    );
   }
   if (SUPABASE_URL && !/^https?:\/\//i.test(SUPABASE_URL)) {
     warnings.push("SUPABASE_URL is missing the https:// prefix — this will fail.");

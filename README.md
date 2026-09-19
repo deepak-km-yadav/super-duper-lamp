@@ -121,6 +121,16 @@ are trying: the unauthenticated response reports whether
 what you sent, which distinguishes a wrong value from a stray newline from a
 variable that was never applied.
 
+A `fetch failed` error when saving means the serverless function could not
+reach Supabase at all. `/api/health` reports the specific reason — most often
+`SUPABASE_URL` has a typo, or the Supabase project is paused (free projects
+pause after a period of inactivity and must be resumed from the dashboard).
+
+Leading and trailing whitespace, wrapping quotes, a trailing slash and a
+`/rest/v1` suffix on `SUPABASE_URL` are all corrected automatically and
+reported under `warnings`. A missing `https://` prefix is not recoverable and
+is reported as an error.
+
 `LEADS_DASHBOARD_TOKEN` grants access to the legacy `/leads` page only. It used
 to double as a BotForge admin token, which meant the old leads password could
 read the stored provider API keys; it no longer does.

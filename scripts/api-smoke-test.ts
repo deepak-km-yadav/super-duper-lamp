@@ -16,6 +16,7 @@ import botsHandler from "../api/bots";
 import publicHandler from "../api/bot-public";
 import keysHandler from "../api/provider-keys";
 import { detectSignals, buildContextSnippet } from "../api/_lib/detect";
+import { readEnv, readEnvUrl, describeFetchFailure } from "../api/_lib/env";
 import actionItemsHandler from "../api/action-items";
 import healthHandler from "../api/health";
 import { apiFetchForTest } from "./api-client-helper";
@@ -392,6 +393,45 @@ async function run() {
   {
     const err = await apiFetchForTest("/api/bots", "", 503);
     check("503 explains missing configuration", /missing configuration/.test(err), err);
+  }
+
+  console.log("\n-- environment normalisation --");
+  {
+    const url = "https://x.supabase.co";
+    check("strips wrapping double quotes", readEnvUrl(`"${url}"`) === url);
+    check("strips wrapping single quotes", readEnvUrl(`'${url}'`) === url);
+    check("strips a trailing newline", readEnvUrl(`${url}\n`) === url);
+    check("strips a trailing slash", readEnvUrl(`${url}/`) === url);
+    check("strips a /rest/v1 suffix", readEnvUrl(`${url}/rest/v1`) === url);
+    check("strips /rest/v1/ with a slash", readEnvUrl(`${url}/rest/v1/`) === url);
+    check("leaves a clean value alone", readEnvUrl(url) === url);
+    check("handles undefined", readEnvUrl(undefined) === "");
+    check("readEnv keeps inner characters", readEnv('  "sk-ant-a/b+c="  ') === "sk-ant-a/b+c=");
+  }
+
+  console.log("\n-- connection failures are explained --");
+  {
+    const invalidUrl = describeFetchFailure(
+      Object.assign(new TypeError("Failed to parse URL from x"), {
+        cause: { code: "ERR_INVALID_URL" },
+      }),
+      "x.supabase.co",
+    );
+    check("invalid URL names the https:// requirement", /https:\/\//.test(invalidUrl), invalidUrl);
+
+    const dns = describeFetchFailure(
+      Object.assign(new TypeError("fetch failed"), { cause: { code: "ENOTFOUND" } }),
+      "https://gone.supabase.co",
+    );
+    check("DNS failure names the host", /gone\.supabase\.co/.test(dns), dns);
+    check("DNS failure mentions a paused project", /paused/.test(dns), dns);
+    check("DNS failure is not the bare undici message", dns !== "fetch failed", dns);
+
+    const timeout = describeFetchFailure(
+      Object.assign(new TypeError("fetch failed"), { cause: { code: "ETIMEDOUT" } }),
+      "https://slow.supabase.co",
+    );
+    check("timeout is reported as a timeout", /Timed out/.test(timeout), timeout);
   }
 
   console.log("\n-- signal detection --");

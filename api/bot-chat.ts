@@ -25,9 +25,11 @@ import { isAdminToken } from "./_lib/auth.js";
 
 export const config = { runtime: "edge" };
 
-const SUPABASE_URL = process.env.SUPABASE_URL || "";
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const IP_SALT = process.env.VISITOR_IP_SALT || "botforge";
+import { readEnv, readEnvUrl } from "./_lib/env.js";
+
+const SUPABASE_URL = readEnvUrl(process.env.SUPABASE_URL);
+const SERVICE_KEY = readEnv(process.env.SUPABASE_SERVICE_ROLE_KEY);
+const IP_SALT = readEnv(process.env.VISITOR_IP_SALT) || "botforge";
 
 const MAX_MESSAGES = 60;
 const MAX_CHARS = 8000;

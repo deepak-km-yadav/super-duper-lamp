@@ -12,7 +12,9 @@ const KEY = "botforge:admin:v1";
 export function getAdminToken(): string {
   if (typeof window === "undefined") return "";
   try {
-    return window.localStorage.getItem(KEY) ?? "";
+    // Trim on read as well as on save: a value stored before this was added,
+    // or pasted with a trailing newline, would otherwise never match.
+    return (window.localStorage.getItem(KEY) ?? "").trim();
   } catch {
     return "";
   }
@@ -20,7 +22,8 @@ export function getAdminToken(): string {
 
 export function setAdminToken(token: string): void {
   try {
-    if (token) window.localStorage.setItem(KEY, token);
+    const clean = token.trim();
+    if (clean) window.localStorage.setItem(KEY, clean);
     else window.localStorage.removeItem(KEY);
   } catch (e) {
     console.warn("[admin-token] save failed", e);

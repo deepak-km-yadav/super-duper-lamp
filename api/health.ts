@@ -12,7 +12,13 @@
  */
 
 import { applyCors, header, type ApiRequest, type ApiResponse } from "./_lib/http.js";
-import { isAdminToken, isAdminConfigured, ADMIN_HEADER } from "./_lib/auth.js";
+import {
+  isAdminToken,
+  isAdminConfigured,
+  adminTokenLength,
+  ADMIN_HEADER,
+  ADMIN_TOKEN_VARIABLE,
+} from "./_lib/auth.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
@@ -59,23 +65,65 @@ async function checkTable(table: string): Promise<TableCheck> {
   }
 }
 
+/** Plain-language cause for a rejected or absent token. */
+function rejectionHint(
+  configured: boolean,
+  suppliedLength: number,
+  configuredLength: number,
+): string {
+  if (!configured) {
+    return (
+      "BOTFORGE_ADMIN_TOKEN is not set on this deployment. Add it in the Vercel " +
+      "project settings, then redeploy -- environment changes do not apply to " +
+      "deployments that already exist."
+    );
+  }
+  if (suppliedLength === 0) {
+    return "Send the token as an x-admin-token header to see configuration detail.";
+  }
+  if (suppliedLength !== configuredLength) {
+    return (
+      `The token sent is ${suppliedLength} characters but the configured one is ` +
+      `${configuredLength}. Check for a trailing newline, a stray space, or ` +
+      "surrounding quotes on either side."
+    );
+  }
+  return (
+    "The token sent is the right length but does not match. Confirm you copied " +
+    "the value now set in Vercel, and that the deployment was rebuilt after it " +
+    "was last changed."
+  );
+}
+
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   applyCors(res, "GET");
   if (req.method === "OPTIONS") return res.status(200).json({ ok: true });
   if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
+  const supplied = header(req, ADMIN_HEADER);
+
   // Reaching this at all proves the serverless runtime is serving /api.
-  if (!isAdminToken(header(req, ADMIN_HEADER))) {
+  if (!isAdminToken(supplied)) {
+    // Enough to name why a token was rejected, without helping guess one: a
+    // variable name and two lengths. The full env/table detail stays behind a
+    // valid token.
+    const configured = isAdminConfigured();
+    const configuredLength = adminTokenLength();
+    const suppliedLength = supplied.trim().length;
+
     return res.status(200).json({
       api: "ok",
-      detail: "Serverless functions are running. Send x-admin-token for configuration detail.",
+      adminConfigured: configured,
+      adminSource: configured ? ADMIN_TOKEN_VARIABLE : null,
+      ...(suppliedLength > 0 ? { configuredLength, suppliedLength } : {}),
+      hint: rejectionHint(configured, suppliedLength, configuredLength),
     });
   }
 
   const env = {
+    BOTFORGE_ADMIN_TOKEN: isAdminConfigured(),
     SUPABASE_URL: Boolean(SUPABASE_URL),
     SUPABASE_SERVICE_ROLE_KEY: Boolean(SERVICE_KEY),
-    BOTFORGE_ADMIN_TOKEN: isAdminConfigured(),
     DETECTION_API_KEY: Boolean(process.env.DETECTION_API_KEY),
     VISITOR_IP_SALT: Boolean(process.env.VISITOR_IP_SALT),
     CRON_SECRET: Boolean(process.env.CRON_SECRET),

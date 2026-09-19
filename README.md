@@ -27,7 +27,7 @@ Copy `.env.example` and set these in Vercel:
 |---|---|---|
 | `SUPABASE_URL` | everything | |
 | `SUPABASE_SERVICE_ROLE_KEY` | everything | Server only — never expose it to the browser |
-| `BOTFORGE_ADMIN_TOKEN` | the dashboard | Long and random: it guards captured names, emails and phone numbers |
+| `BOTFORGE_ADMIN_TOKEN` | the dashboard | Long and random: it guards captured names, emails and phone numbers. No quotes, no trailing newline, and a change needs a redeploy |
 | `DETECTION_API_KEY` | agent actions | Anthropic key for lead/meeting extraction |
 | `DETECTION_MODEL` | agent actions | Defaults to `claude-haiku-4-5` |
 | `VISITOR_IP_SALT` | rate limiting | Any random string |
@@ -114,6 +114,16 @@ curl -s https://<your-app>/api/health -H "x-admin-token: $TOKEN" | jq
 `ready: true` means everything is configured. Otherwise `tables` and `warnings`
 name the problem — most often the anon key used in place of the service role
 key, or the migration not yet applied.
+
+If the dashboard says the admin token was rejected, call it with the token you
+are trying: the unauthenticated response reports whether
+`BOTFORGE_ADMIN_TOKEN` is set on this deployment and how its length compares to
+what you sent, which distinguishes a wrong value from a stray newline from a
+variable that was never applied.
+
+`LEADS_DASHBOARD_TOKEN` grants access to the legacy `/leads` page only. It used
+to double as a BotForge admin token, which meant the old leads password could
+read the stored provider API keys; it no longer does.
 
 `npm run test:api` needs `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` and
 `BOTFORGE_ADMIN_TOKEN` set to any placeholder values.

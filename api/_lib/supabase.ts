@@ -6,8 +6,10 @@
  * dependency, and it works unchanged on both the Node and Edge runtimes.
  */
 
-export const SUPABASE_URL = process.env.SUPABASE_URL || "";
-export const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+import { readEnv, readEnvUrl, describeFetchFailure } from "./env.js";
+
+export const SUPABASE_URL = readEnvUrl(process.env.SUPABASE_URL);
+export const SUPABASE_SERVICE_ROLE_KEY = readEnv(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 export function isSupabaseConfigured(): boolean {
   return Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
@@ -39,11 +41,21 @@ async function request<T>(
     throw new SupabaseError("Supabase env vars are missing", 500);
   }
 
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-    method: init.method,
-    headers: headers(init.prefer ? { Prefer: init.prefer } : undefined),
-    body: init.body === undefined ? undefined : JSON.stringify(init.body),
-  });
+  const url = `${SUPABASE_URL}/rest/v1/${path}`;
+
+  // A connection failure has to be caught here. Without this, undici's bare
+  // "fetch failed" propagated all the way to the browser, which said nothing
+  // about which host could not be reached or why.
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: init.method,
+      headers: headers(init.prefer ? { Prefer: init.prefer } : undefined),
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    });
+  } catch (e) {
+    throw new SupabaseError(describeFetchFailure(e, SUPABASE_URL), 502);
+  }
 
   const raw = await res.text();
   if (!res.ok) {

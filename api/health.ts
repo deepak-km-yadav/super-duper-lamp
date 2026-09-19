@@ -12,6 +12,7 @@
  */
 
 import { applyCors, header, type ApiRequest, type ApiResponse } from "./_lib/http.js";
+import { readEnv, readEnvUrl, describeFetchFailure } from "./_lib/env.js";
 import {
   isAdminToken,
   isAdminConfigured,
@@ -20,8 +21,8 @@ import {
   ADMIN_TOKEN_VARIABLE,
 } from "./_lib/auth.js";
 
-const SUPABASE_URL = process.env.SUPABASE_URL || "";
-const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const SUPABASE_URL = readEnvUrl(process.env.SUPABASE_URL);
+const SERVICE_KEY = readEnv(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 type TableCheck = { ok: boolean; detail: string };
 
@@ -54,14 +55,7 @@ async function checkTable(table: string): Promise<TableCheck> {
     }
     return { ok: false, detail: `Supabase returned ${res.status}: ${body.slice(0, 200)}` };
   } catch (e) {
-    return {
-      ok: false,
-      detail:
-        "Could not reach Supabase. Check SUPABASE_URL — it should be the bare project " +
-        `URL with no trailing slash and no /rest/v1 suffix. (${
-          e instanceof Error ? e.message : "network error"
-        })`,
-    };
+    return { ok: false, detail: describeFetchFailure(e, SUPABASE_URL) };
   }
 }
 
@@ -129,12 +123,24 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     CRON_SECRET: Boolean(process.env.CRON_SECRET),
   };
 
+  // Compare against the raw value: the normalised one has already had these
+  // corrected, so checking it would never report anything.
+  const rawUrl = process.env.SUPABASE_URL || "";
   const warnings: string[] = [];
-  if (SUPABASE_URL.endsWith("/")) {
-    warnings.push("SUPABASE_URL has a trailing slash; remove it.");
+  if (rawUrl.trim() !== rawUrl) {
+    warnings.push("SUPABASE_URL has leading or trailing whitespace (corrected automatically).");
   }
-  if (/\/rest\/v1/.test(SUPABASE_URL)) {
-    warnings.push("SUPABASE_URL should be the bare project URL, without /rest/v1.");
+  if (/^["']|["']$/.test(rawUrl.trim())) {
+    warnings.push("SUPABASE_URL is wrapped in quotes (corrected automatically).");
+  }
+  if (/\/$/.test(rawUrl.trim())) {
+    warnings.push("SUPABASE_URL has a trailing slash (corrected automatically).");
+  }
+  if (/\/rest\/v1\/?$/.test(rawUrl.trim())) {
+    warnings.push("SUPABASE_URL includes /rest/v1 (corrected automatically).");
+  }
+  if (SUPABASE_URL && !/^https?:\/\//i.test(SUPABASE_URL)) {
+    warnings.push("SUPABASE_URL is missing the https:// prefix — this will fail.");
   }
   if (!env.DETECTION_API_KEY) {
     warnings.push(

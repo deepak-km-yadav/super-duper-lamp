@@ -19,6 +19,7 @@ Run both files in `supabase/migrations/`, in order, in the Supabase SQL editor:
 3. `0003_test_flag.sql` — marks captures made while testing in the editor.
 4. `0004_conversation_summary.sql` — rolling conversation summary and meeting
    summaries.
+5. `0005_notifications.sql` — per-bot notification targets.
 
 The second file is not optional. Enabling RLS and granting privileges are
 independent: the service role's `BYPASSRLS` lets it ignore policies, but it
@@ -92,6 +93,19 @@ work without configuring a second key.
 > a bot with substantial documents that will dominate the token bill; capping
 > or retrieving per-turn is the next thing to look at.
 
+## Bot settings that affect behaviour
+
+- **Visibility** — `private` makes the public link and any embed stop working
+  entirely; only the editor's Live test panel can reach the bot. `unlisted` is
+  reachable by link but left out of Explore. `public` is both.
+- **Content filter** — a safety instruction added to the system prompt, not a
+  separate classifier. `strict` also keeps the bot to its stated purpose and
+  refuses to repeat its configuration. A determined visitor may still get
+  around it; the editor says so.
+- **Memory** — `none` sends only the current message and no summary, so the bot
+  cannot follow up on anything earlier. `session` keeps the thread until the tab
+  closes; `persistent` keeps it across visits.
+
 ## Model parameters
 
 OpenAI's reasoning families (`gpt-5*`, `o1`/`o3`/`o4`…) take
@@ -118,6 +132,14 @@ reply streams, so a lead is recorded before the first token and detection never
 delays a response. A small model then enriches it out of band with the name,
 intent and a date phrased in the visitor's own words. `api/detect-sweep.ts`
 runs hourly to catch sessions abandoned mid-reply.
+
+Set an email address or a webhook URL on the bot and each capture is announced
+as it happens, carrying the name, contact details, summary and the piece of
+conversation it came from. A capture is announced exactly once: the pass that
+runs after a reply does it where it can, and the hourly sweeper picks up
+anything missed. Test captures never notify, and nor does a lead with no way to
+reach the person. Email needs `RESEND_API_KEY` and `NOTIFY_EMAIL_FROM`; a
+webhook needs nothing beyond the URL.
 
 Everything captured appears at `/chatterbox/action-items`, with the
 conversation context, the full transcript, a status workflow and CSV export.

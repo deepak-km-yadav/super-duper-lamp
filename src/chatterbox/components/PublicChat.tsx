@@ -33,6 +33,7 @@ export function PublicChat({
   const { messages, send, stop, regenerate, reset, isStreaming, error } = useChat({
     slug: bot.slug,
     botId: bot.id,
+    memory: bot.memory,
     initialMessages: initial,
   });
 

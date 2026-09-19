@@ -42,7 +42,7 @@ export type BotRow = {
 /** Columns safe to expose on the public chat endpoint. */
 export const PUBLIC_BOT_COLUMNS =
   "id,slug,name,bio,description,avatar_url,avatar_initials,theme_color," +
-  "greeting,starter_prompts,chat_theme,tags,language,status";
+  "greeting,starter_prompts,chat_theme,tags,language,memory,status,visibility";
 
 const ROW_TO_BOT: Record<string, string> = {
   avatar_url: "avatarUrl",
@@ -59,6 +59,8 @@ const ROW_TO_BOT: Record<string, string> = {
   allowed_domains: "allowedDomains",
   agent_enabled: "agentEnabled",
   agent_actions: "agentActions",
+  notify_email: "notifyEmail",
+  notify_webhook_url: "notifyWebhookUrl",
   daily_message_cap: "dailyMessageCap",
   created_at: "createdAt",
   updated_at: "updatedAt",
@@ -86,7 +88,7 @@ const KNOWN_COLUMNS = new Set([
   "model_id", "temperature", "max_tokens", "top_p", "memory", "chat_theme",
   "visibility", "status", "content_filter", "tags", "language",
   "allowed_domains", "agent_enabled", "agent_actions", "daily_message_cap",
-  "published_at",
+  "notify_email", "notify_webhook_url", "published_at",
 ]);
 
 /**

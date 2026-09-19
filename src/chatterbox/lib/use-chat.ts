@@ -1,5 +1,5 @@
 import * as React from "react";
-import type { ChatMessage } from "./types";
+import type { ChatMessage, MemoryMode } from "./types";
 
 /**
  * Unsaved editor edits, sent so the Test panel can exercise a draft. Accepted
@@ -28,8 +28,9 @@ export type UseChatOptions = {
   /** Editor Test panel only: unsaved edits plus the admin token to authorize them. */
   draft?: DraftOverride;
   adminToken?: string;
-  /** Usage accounting is still recorded locally, keyed by bot id. */
   botId?: string;
+  /** Decides whether a session id is remembered, and for how long. */
+  memory?: MemoryMode;
   initialMessages?: ChatMessage[];
 };
 
@@ -191,24 +192,42 @@ function sessionKey(slug: string, isTest: boolean): string {
   return `botforge:session:${slug}:${isTest ? "test" : "live"}`;
 }
 
-function loadSessionId(slug: string, isTest: boolean): string | null {
+/**
+ * "session" ends with the tab; "persistent" survives it, so a returning
+ * visitor carries on where they left off. "none" stores nothing at all.
+ */
+function storeFor(memory: MemoryMode): Storage | null {
+  if (typeof window === "undefined" || memory === "none") return null;
   try {
-    return window.sessionStorage.getItem(sessionKey(slug, isTest));
+    return memory === "persistent" ? window.localStorage : window.sessionStorage;
   } catch {
     return null;
   }
 }
 
-function saveSessionId(slug: string, isTest: boolean, id: string): void {
+function loadSessionId(slug: string, isTest: boolean, memory: MemoryMode): string | null {
   try {
-    window.sessionStorage.setItem(sessionKey(slug, isTest), id);
+    return storeFor(memory)?.getItem(sessionKey(slug, isTest)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function saveSessionId(
+  slug: string,
+  isTest: boolean,
+  memory: MemoryMode,
+  id: string,
+): void {
+  try {
+    storeFor(memory)?.setItem(sessionKey(slug, isTest), id);
   } catch {
     // Non-fatal: the server just starts a new session next time.
   }
 }
 
 export function useChat(opts: UseChatOptions) {
-  const { initialMessages = [], botId, slug, draft, adminToken } = opts;
+  const { initialMessages = [], botId, slug, draft, adminToken, memory = "session" } = opts;
   const [messages, setMessages] = React.useState<ChatMessage[]>(initialMessages);
   const [isStreaming, setIsStreaming] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -218,13 +237,13 @@ export function useChat(opts: UseChatOptions) {
 
   const sessionIdRef = React.useRef<string | null>(null);
   React.useEffect(() => {
-    sessionIdRef.current = loadSessionId(slug, Boolean(adminToken));
-  }, [slug, adminToken]);
+    sessionIdRef.current = loadSessionId(slug, Boolean(adminToken), memory);
+  }, [slug, adminToken, memory]);
 
-  const optsRef = React.useRef({ botId, slug, draft, adminToken });
+  const optsRef = React.useRef({ botId, slug, draft, adminToken, memory });
   React.useEffect(() => {
-    optsRef.current = { botId, slug, draft, adminToken };
-  }, [botId, slug, draft, adminToken]);
+    optsRef.current = { botId, slug, draft, adminToken, memory };
+  }, [botId, slug, draft, adminToken, memory]);
 
   const send = React.useCallback(
     async (text: string) => {
@@ -276,7 +295,7 @@ export function useChat(opts: UseChatOptions) {
 
         if (result.sessionId) {
           sessionIdRef.current = result.sessionId;
-          saveSessionId(current.slug, Boolean(current.adminToken), result.sessionId);
+          saveSessionId(current.slug, Boolean(current.adminToken), current.memory, result.sessionId);
         }
 
         const latencyMs = Math.round(performance.now() - startedAt);

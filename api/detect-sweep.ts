@@ -8,9 +8,9 @@
  * Guarded by CRON_SECRET; Vercel sends it as a bearer token on scheduled runs.
  */
 
-import { sbSelect, SupabaseError } from "./_lib/supabase.js";
+import { sbSelect, sbSelectOne, SupabaseError } from "./_lib/supabase.js";
 import { applyCors, header, queryParam, type ApiRequest, type ApiResponse } from "./_lib/http.js";
-import { analyzeSession } from "./chat-turn.js";
+import { analyzeSession, notifyPending } from "./chat-turn.js";
 
 const CRON_SECRET = process.env.CRON_SECRET || "";
 const BATCH = 25;
@@ -48,7 +48,35 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       }
     }
 
-    return res.status(200).json({ scanned: sessions.length, analyzed });
+    // Captures whose notice never went out -- the visitor closed the tab
+    // before /api/chat-turn fired, or a webhook was down at the time.
+    let notified = 0;
+    try {
+      const pending = await sbSelect<{ bot_id: string }>(
+        "leads",
+        "select=bot_id&notified_at=is.null&limit=50",
+      );
+      const meetings = await sbSelect<{ bot_id: string }>(
+        "meeting_requests",
+        "select=bot_id&notified_at=is.null&limit=50",
+      );
+      const botIds = [...new Set([...pending, ...meetings].map((r) => r.bot_id))].filter(Boolean);
+
+      for (const botId of botIds) {
+        const bot = await sbSelectOne<Parameters<typeof notifyPending>[0]>(
+          "bots",
+          "select=id,name,agent_enabled,agent_actions,provider_id,model_id," +
+            `notify_email,notify_webhook_url&id=eq.${botId}`,
+        );
+        if (!bot) continue;
+        await notifyPending(bot, false);
+        notified++;
+      }
+    } catch {
+      // Reported as zero; the next sweep tries again.
+    }
+
+    return res.status(200).json({ scanned: sessions.length, analyzed, notified });
   } catch (e) {
     const err = e as SupabaseError;
     return res

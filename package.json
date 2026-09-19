@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.api.json",
     "test:api": "esbuild scripts/api-smoke-test.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/api-smoke-test.mjs --log-level=error && node node_modules/.cache/api-smoke-test.mjs",
-    "check:esm": "node scripts/check-esm.mjs"
+    "check:esm": "node scripts/check-esm.mjs",
+    "test:auth": "esbuild scripts/auth-token-test.ts api/_lib/auth.ts --platform=node --format=esm --outdir=node_modules/.cache/authtest --outbase=. --log-level=error && node node_modules/.cache/authtest/scripts/auth-token-test.js"
   },
   "dependencies": {
     "clsx": "^2.1.1",

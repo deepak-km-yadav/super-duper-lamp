@@ -42,6 +42,22 @@ export function AdminTokenPrompt({
         token set as <code className="text-xs">BOTFORGE_ADMIN_TOKEN</code> to
         continue.
       </p>
+      {rejected && (
+        <p className="mt-2 text-xs text-muted">
+          Still rejected?{" "}
+          <a
+            href="/api/health"
+            target="_blank"
+            rel="noreferrer"
+            className="text-accent hover:underline"
+          >
+            Open /api/health
+          </a>{" "}
+          — it reports whether the variable is set on this deployment and
+          whether the lengths match. Note that changing it in Vercel needs a
+          redeploy before it takes effect.
+        </p>
+      )}
       <div className="mt-4 text-left">
         <Label htmlFor="admin-token">Admin token</Label>
         <Input

@@ -349,6 +349,23 @@ async function run() {
       !JSON.stringify(out.payload).includes("admin-secret-token"), out.payload);
     check("health checks the tables", out.payload.tables?.bots?.ok === true, out.payload.tables);
   }
+  {
+    // A rejected token must name its own cause rather than going quiet.
+    const { res, out } = mkRes();
+    await healthHandler(
+      { method: "GET", headers: { "x-admin-token": "wrong-token" } },
+      res as any,
+    );
+    check("rejected token reports the variable",
+      out.payload.adminSource === "BOTFORGE_ADMIN_TOKEN", out.payload);
+    check("rejected token compares lengths",
+      out.payload.suppliedLength === 11 && out.payload.configuredLength === 18, out.payload);
+    check("length mismatch is explained", /trailing newline/.test(out.payload.hint), out.payload.hint);
+    check("rejected token still hides env and tables",
+      out.payload.env === undefined && out.payload.tables === undefined, out.payload);
+    check("rejected token never echoes a value",
+      !JSON.stringify(out.payload).includes("admin-secret-token"), out.payload);
+  }
 
   console.log("\n-- client error messages --");
   {

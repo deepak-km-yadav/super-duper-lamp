@@ -10,6 +10,16 @@ type Options = {
   /** When set, the leads insert responds with this error. */
   failLeads?: string;
   agentActions?: string[];
+  /** Extra history, to exercise the live-window trim. */
+  history?: { role: "user" | "assistant"; content: string }[];
+  /** A stored rolling summary on the session. */
+  sessionSummary?: string;
+  /** Provider/model, to exercise the reasoning-model paths. */
+  providerId?: string;
+  modelId?: string;
+  maxTokens?: number;
+  /** Stream frames to send instead of a normal reply. */
+  frames?: string;
 };
 
 export type CaptureResult = {
@@ -19,10 +29,15 @@ export type CaptureResult = {
   leadRow?: Record<string, unknown>;
   captureError?: string;
   streamed: string;
+  /** Errors delivered as SSE events rather than thrown. */
+  streamError?: string;
+  /** The body sent to the provider. */
+  providerBody?: Record<string, unknown>;
 };
 
 export async function captureTurn(opts: Options): Promise<CaptureResult> {
   const calls: CaptureResult["calls"] = [];
+  let providerBody: Record<string, unknown> | undefined;
   const original = globalThis.fetch;
 
   (globalThis as unknown as { fetch: unknown }).fetch = async (url: string, init: RequestInit) => {
@@ -32,7 +47,10 @@ export async function captureTurn(opts: Options): Promise<CaptureResult> {
 
     // The provider call, not Supabase.
     if (u.includes("/chat/completions") || u.includes("api.anthropic.com")) {
-      const frame = `data: ${JSON.stringify({ choices: [{ delta: { content: "hi" } }] })}\n\ndata: [DONE]\n\n`;
+      providerBody = init?.body ? JSON.parse(String(init.body)) : undefined;
+      const frame =
+        opts.frames ??
+        `data: ${JSON.stringify({ choices: [{ delta: { content: "hi" } }] })}\n\ndata: [DONE]\n\n`;
       return {
         ok: true,
         status: 200,
@@ -67,7 +85,10 @@ export async function captureTurn(opts: Options): Promise<CaptureResult> {
       return json([
         {
           id: "b1", slug: "s", name: "B", status: "PUBLISHED", system_prompt: "sys",
-          provider_id: "openai", model_id: "gpt-4o", temperature: 0.7, max_tokens: 100,
+          provider_id: opts.providerId ?? "openai",
+          model_id: opts.modelId ?? "gpt-4o",
+          temperature: 0.7,
+          max_tokens: opts.maxTokens ?? 100,
           top_p: 1, allowed_domains: [], agent_enabled: true,
           agent_actions: opts.agentActions ?? ["lead_magnet", "scheduler"],
           daily_message_cap: 0,
@@ -88,6 +109,7 @@ export async function captureTurn(opts: Options): Promise<CaptureResult> {
 
   let streamed = "";
   let captureError: string | undefined;
+  let streamError: string | undefined;
   try {
     const res = await handler(
       new Request("https://app.test/api/bot-chat", {
@@ -96,7 +118,10 @@ export async function captureTurn(opts: Options): Promise<CaptureResult> {
           "content-type": "application/json",
           ...(opts.admin ? { "x-admin-token": "admin-secret-token" } : {}),
         },
-        body: JSON.stringify({ slug: "s", messages: [{ role: "user", content: opts.message }] }),
+        body: JSON.stringify({
+          slug: "s",
+          messages: [...(opts.history ?? []), { role: "user", content: opts.message }],
+        }),
       }),
     );
     const text = await res.text();
@@ -107,6 +132,7 @@ export async function captureTurn(opts: Options): Promise<CaptureResult> {
       const ev = JSON.parse(raw);
       if (ev.t === "delta") streamed += ev.v;
       if (ev.t === "meta" && ev.captureError) captureError = ev.captureError;
+      if (ev.t === "error") streamError = ev.message;
     }
   } finally {
     (globalThis as unknown as { fetch: unknown }).fetch = original;
@@ -122,5 +148,7 @@ export async function captureTurn(opts: Options): Promise<CaptureResult> {
     leadRow: leadInsert?.body,
     captureError,
     streamed,
+    streamError,
+    providerBody,
   };
 }

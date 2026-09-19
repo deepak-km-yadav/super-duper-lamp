@@ -14,12 +14,20 @@ import {
   extractLead,
   extractMeeting,
   buildTranscript,
-  isExtractionConfigured,
+  summariseConversation,
+  extractionModelFor,
+  type ExtractionModel,
 } from "./_lib/extract.js";
 
 type SessionRow = { id: string; bot_id: string; analyzed_at: string | null; is_test: boolean };
-type BotRow = { id: string; agent_enabled: boolean; agent_actions: string[] };
-type MessageRow = { role: string; content: string };
+type BotRow = {
+  id: string;
+  agent_enabled: boolean;
+  agent_actions: string[];
+  provider_id: string;
+  model_id: string;
+};
+type MessageRow = { id: number; role: string; content: string };
 
 export default async function handler(req: ApiRequest, res: ApiResponse) {
   applyCors(res, "POST");
@@ -81,10 +89,20 @@ export async function analyzeSession(
 ): Promise<void> {
   const bot = await sbSelectOne<BotRow>(
     "bots",
-    `select=id,agent_enabled,agent_actions&id=eq.${botId}`,
+    `select=id,agent_enabled,agent_actions,provider_id,model_id&id=eq.${botId}`,
   );
-  if (!bot?.agent_enabled) return;
+  if (!bot) return;
 
+  // Resolve which model does the background work. A dedicated DETECTION_API_KEY
+  // is preferred; without one, reuse the bot's own provider and stored key,
+  // because requiring a second key meant no summaries at all.
+  const model = extractionModelFor(await botOwnModel(bot));
+
+  // The rolling summary runs for every bot, agent or not: it is what keeps the
+  // live context small.
+  await refreshSummary(sessionId, model);
+
+  if (!bot.agent_enabled) return;
   const actions = Array.isArray(bot.agent_actions) ? bot.agent_actions : [];
   if (actions.length === 0) return;
 
@@ -92,11 +110,11 @@ export async function analyzeSession(
     analyzed_at: new Date().toISOString(),
   });
 
-  if (!isExtractionConfigured()) return;
+  if (!model) return;
 
   const messages = await sbSelect<MessageRow>(
     "chat_messages",
-    `select=role,content&session_id=eq.${sessionId}&order=created_at.asc&limit=40`,
+    `select=id,role,content&session_id=eq.${sessionId}&order=created_at.asc&limit=40`,
   );
   if (messages.length === 0) return;
 
@@ -104,21 +122,85 @@ export async function analyzeSession(
   const snippet = buildContextSnippet(messages);
 
   if (actions.includes("lead_magnet")) {
-    await enrichLead(sessionId, botId, transcript, snippet, isTest);
+    await enrichLead(model, sessionId, botId, transcript, snippet, isTest);
   }
   if (actions.includes("scheduler")) {
-    await enrichMeeting(sessionId, botId, transcript, snippet, isTest);
+    await enrichMeeting(model, sessionId, botId, transcript, snippet, isTest);
+  }
+}
+
+/** The bot's own provider and stored key, for use when no dedicated key is set. */
+async function botOwnModel(bot: BotRow): Promise<ExtractionModel | null> {
+  try {
+    const rows = await sbSelect<{ api_key: string }>(
+      "provider_keys",
+      `select=api_key&provider_id=eq.${encodeURIComponent(bot.provider_id)}&limit=1`,
+    );
+    const apiKey = rows[0]?.api_key;
+    if (!apiKey) return null;
+    return { providerId: bot.provider_id, modelId: bot.model_id, apiKey };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Folds turns that have scrolled out of the live window into the session's
+ * running summary.
+ *
+ * Runs after the reply has already streamed, so the visitor never waits on it.
+ * LIVE_TURNS here must stay in step with api/bot-chat.ts.
+ */
+const LIVE_TURNS = 8;
+const SUMMARY_TRIGGER = LIVE_TURNS + 4;
+
+async function refreshSummary(sessionId: string, model: ExtractionModel | null): Promise<void> {
+  if (!model) return;
+  try {
+    const session = await sbSelectOne<{
+      summary: string | null;
+      summary_through_message_id: number | null;
+    }>("chat_sessions", `select=summary,summary_through_message_id&id=eq.${sessionId}`);
+    if (!session) return;
+
+    const all = await sbSelect<MessageRow>(
+      "chat_messages",
+      `select=id,role,content&session_id=eq.${sessionId}&order=id.asc&limit=200`,
+    );
+    // Nothing has scrolled out of the live window yet.
+    if (all.length < SUMMARY_TRIGGER) return;
+
+    const older = all.slice(0, -LIVE_TURNS);
+    const through = session.summary_through_message_id ?? 0;
+    const unseen = older.filter((m) => m.id > through);
+    if (unseen.length === 0) return;
+
+    const summary = await summariseConversation(
+      model,
+      buildTranscript(unseen),
+      session.summary,
+    );
+    if (!summary) return;
+
+    await sbUpdate("chat_sessions", `id=eq.${sessionId}`, {
+      summary,
+      summary_through_message_id: older[older.length - 1].id,
+      summary_updated_at: new Date().toISOString(),
+    });
+  } catch {
+    // The conversation still works with a stale or absent summary.
   }
 }
 
 async function enrichLead(
+  model: ExtractionModel,
   sessionId: string,
   botId: string,
   transcript: string,
   snippet: string,
   isTest: boolean,
 ): Promise<void> {
-  const extracted = await extractLead(transcript);
+  const extracted = await extractLead(model, transcript);
   if (!extracted) return;
 
   // A lead needs a way to reach the person; a name alone is not a lead.
@@ -156,13 +238,14 @@ async function enrichLead(
 }
 
 async function enrichMeeting(
+  model: ExtractionModel,
   sessionId: string,
   botId: string,
   transcript: string,
   snippet: string,
   isTest: boolean,
 ): Promise<void> {
-  const extracted = await extractMeeting(transcript);
+  const extracted = await extractMeeting(model, transcript);
   if (!extracted?.isMeetingRequest) return;
 
   const existing = await sbSelectOne<{ id: number }>(
@@ -176,6 +259,7 @@ async function enrichMeeting(
     requested_for_text: extracted.requestedForText,
     timezone: extracted.timezone,
     topic: extracted.topic,
+    summary: extracted.summary,
     context_snippet: snippet,
   };
 

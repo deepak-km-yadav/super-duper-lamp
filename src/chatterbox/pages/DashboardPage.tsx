@@ -8,6 +8,7 @@ import type { Bot } from "../lib/types";
 import { removeBot, createBot, migrateLocalBotsOnce } from "../lib/bot-store";
 import { useBots } from "../lib/use-bot-store";
 import { hasAdminToken, isAuthError } from "../lib/admin-token";
+import { fetchUsage, type UsageBucket } from "../lib/usage";
 import { AdminTokenPrompt, ErrorState } from "../components/AdminGate";
 import { ChatterboxNav } from "../components/ChatterboxNav";
 import { exportBots, importBots } from "../lib/bot-io";
@@ -19,6 +20,8 @@ export function DashboardPage() {
   const [query, setQuery] = React.useState("");
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [hasToken, setHasToken] = React.useState(hasAdminToken);
+  // Token totals per bot, so the cards show what each one is actually costing.
+  const [usage, setUsage] = React.useState<Record<string, UsageBucket>>({});
 
   // Bots created before this app had a server still live in localStorage.
   // Copy them up once, then read from the server from here on.
@@ -38,6 +41,24 @@ export function DashboardPage() {
   }, []);
 
   const botsState = useBots(migrate);
+
+  React.useEffect(() => {
+    if (!hasToken) return;
+    let cancelled = false;
+    fetchUsage("30d")
+      .then((r) => {
+        if (cancelled) return;
+        const next: Record<string, UsageBucket> = {};
+        for (const b of r.byBot) if (b.botId) next[b.botId] = b;
+        setUsage(next);
+      })
+      .catch(() => {
+        // The dashboard is useful without these numbers.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasToken]);
   const bots = botsState.status === "ready" ? botsState.data : null;
   const refresh = botsState.reload;
 
@@ -228,6 +249,7 @@ export function DashboardPage() {
                 bot={b}
                 index={i}
                 busy={busyId === b.id}
+                usage={usage[b.id]}
                 onDelete={() => void onDelete(b)}
                 onDuplicate={() => void onDuplicate(b)}
                 onShare={() => onShare(b)}
@@ -244,6 +266,7 @@ function BotCard({
   bot,
   index,
   busy,
+  usage,
   onDelete,
   onDuplicate,
   onShare,
@@ -251,6 +274,7 @@ function BotCard({
   bot: Bot;
   index: number;
   busy?: boolean;
+  usage?: UsageBucket;
   onDelete: () => void;
   onDuplicate: () => void;
   onShare: () => void;
@@ -289,6 +313,12 @@ function BotCard({
           </span>
           <span>{fmtDate(bot.updatedAt)}</span>
         </div>
+        {usage && usage.messages > 0 && (
+          <div className="mt-1 text-[11px] text-muted">
+            {compact(usage.promptTokens)} in · {compact(usage.completionTokens)} out
+            <span className="opacity-60"> · 30 days</span>
+          </div>
+        )}
       </Link>
 
       <div
@@ -362,6 +392,12 @@ function CardAction({
       {children}
     </button>
   );
+}
+
+function compact(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
 }
 
 function BotCardSkeleton({ index }: { index: number }) {

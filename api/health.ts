@@ -26,6 +26,34 @@ const SERVICE_KEY = readEnv(process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 type TableCheck = { ok: boolean; detail: string };
 
+/**
+ * A marker column per migration, so an unapplied one is reported by name
+ * rather than leaking a raw Postgres error into the dashboard.
+ */
+const MIGRATION_MARKERS: { table: string; column: string; migration: string }[] = [
+  { table: "bots", column: "agent_enabled", migration: "0001_botforge.sql" },
+  { table: "meeting_requests", column: "is_test", migration: "0003_test_flag.sql" },
+  { table: "chat_sessions", column: "summary", migration: "0004_conversation_summary.sql" },
+];
+
+async function checkMigrations(): Promise<string[]> {
+  const missing: string[] = [];
+  for (const m of MIGRATION_MARKERS) {
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/rest/v1/${m.table}?select=${m.column}&limit=0`,
+        { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } },
+      );
+      if (res.ok) continue;
+      const body = await res.text();
+      if (/42703|does not exist/i.test(body)) missing.push(m.migration);
+    } catch {
+      // Connectivity is reported separately by checkTable.
+    }
+  }
+  return missing;
+}
+
 async function checkTable(table: string): Promise<TableCheck> {
   try {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?select=*&limit=0`, {
@@ -177,11 +205,18 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         }
       : null;
 
+  const pendingMigrations =
+    env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY ? await checkMigrations() : [];
+  for (const m of pendingMigrations) {
+    warnings.push(`Migration ${m} has not been applied — run it in the Supabase SQL editor.`);
+  }
+
   const ready =
+    pendingMigrations.length === 0 &&
     env.SUPABASE_URL &&
     env.SUPABASE_SERVICE_ROLE_KEY &&
     env.BOTFORGE_ADMIN_TOKEN &&
     Boolean(tables && Object.values(tables).every((t) => t.ok));
 
-  return res.status(200).json({ api: "ok", ready, env, tables, warnings });
+  return res.status(200).json({ api: "ok", ready, env, tables, pendingMigrations, warnings });
 }

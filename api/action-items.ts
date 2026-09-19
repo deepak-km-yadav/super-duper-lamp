@@ -32,6 +32,7 @@ type LeadRow = {
 };
 
 type MeetingRow = {
+  summary: string | null;
   is_test: boolean;
   id: number;
   bot_id: string | null;
@@ -92,7 +93,7 @@ async function handleGet(req: ApiRequest, res: ApiResponse) {
   const botFilter = botId ? `&bot_id=eq.${encodeURIComponent(botId)}` : "";
   const testFilter = includeTest ? "" : "&is_test=eq.false";
 
-  const [leads, meetings, bots] = await Promise.all([
+  const [leads, meetings, bots, sessions] = await Promise.all([
     sbSelect<LeadRow>(
       "leads",
       `select=*${botFilter}${testFilter}&order=created_at.desc&limit=${limit}`,
@@ -102,10 +103,18 @@ async function handleGet(req: ApiRequest, res: ApiResponse) {
       `select=*${botFilter}${testFilter}&order=created_at.desc&limit=${limit}`,
     ),
     sbSelect<{ id: string; name: string }>("bots", "select=id,name"),
+    sbSelect<{ id: string; summary: string | null }>(
+      "chat_sessions",
+      `select=id,summary&summary=not.is.null&order=last_message_at.desc&limit=${limit * 2}`,
+    ),
   ]);
 
   const botNames: Record<string, string> = {};
   for (const b of bots) botNames[b.id] = b.name;
+
+  // Used when an item has no summary of its own yet.
+  const sessionSummaries: Record<string, string> = {};
+  for (const sess of sessions) if (sess.summary) sessionSummaries[sess.id] = sess.summary;
 
   return res.status(200).json({
     leads: leads.map((l) => ({
@@ -119,6 +128,7 @@ async function handleGet(req: ApiRequest, res: ApiResponse) {
       company: l.company,
       intent: l.intent,
       summary: l.summary,
+      sessionSummary: l.session_id ? (sessionSummaries[l.session_id] ?? null) : null,
       contextSnippet: l.context_snippet,
       status: l.status,
       detectedBy: l.detected_by,
@@ -135,6 +145,8 @@ async function handleGet(req: ApiRequest, res: ApiResponse) {
       requestedFor: m.requested_for_text,
       timezone: m.timezone,
       topic: m.topic,
+      summary: m.summary,
+      sessionSummary: m.session_id ? (sessionSummaries[m.session_id] ?? null) : null,
       contextSnippet: m.context_snippet,
       status: m.status,
       isTest: m.is_test,

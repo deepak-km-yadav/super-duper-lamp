@@ -22,7 +22,16 @@ export type ProviderConfig = {
 
 export type StreamEvent =
   | { t: "delta"; v: string }
-  | { t: "usage"; in?: number; out?: number };
+  | { t: "usage"; in?: number; out?: number }
+  | { t: "stop"; reason: string };
+
+/**
+ * Reasoning models spend part of their token budget thinking, and that
+ * thinking counts against max_completion_tokens. At the old 1024 default a
+ * single reasoning-heavy turn could consume the whole allowance and return no
+ * visible text at all, which surfaced as an empty chat bubble with no error.
+ */
+export const REASONING_TOKEN_FLOOR = 4096;
 
 /** Providers exposing an OpenAI-compatible /chat/completions endpoint. */
 const OPENAI_COMPAT: Record<string, string> = {
@@ -100,6 +109,73 @@ export class ProviderError extends Error {
   }
 }
 
+/**
+ * One non-streaming completion, for the background work: extraction and the
+ * rolling conversation summary.
+ *
+ * Shares capabilitiesFor() with the streaming path, so it inherits the
+ * reasoning-model token parameter and floor rather than repeating them.
+ * Returns null instead of throwing -- every caller is a background improvement
+ * that must not break a conversation.
+ */
+export async function completeOnce(
+  cfg: ProviderConfig,
+  prompt: string,
+  maxTokens = 1024,
+): Promise<string | null> {
+  try {
+    if (cfg.providerId === "anthropic") {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": cfg.apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: cfg.modelId,
+          max_tokens: maxTokens,
+          ...(cfg.systemPrompt ? { system: cfg.systemPrompt } : {}),
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      if (!res.ok) return null;
+      const body = (await res.json()) as { content?: { type: string; text?: string }[] };
+      return body.content?.find((b) => b.type === "text")?.text ?? null;
+    }
+
+    const baseUrl = baseUrlFor(cfg.providerId);
+    if (!baseUrl) return null;
+
+    const caps = capabilitiesFor(cfg.providerId, cfg.modelId);
+    const budget = caps.sampling ? maxTokens : Math.max(maxTokens, REASONING_TOKEN_FLOOR);
+
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${cfg.providerId === "ollama" ? "ollama" : cfg.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: cfg.modelId,
+        messages: [
+          ...(cfg.systemPrompt ? [{ role: "system", content: cfg.systemPrompt }] : []),
+          { role: "user", content: prompt },
+        ],
+        [caps.tokenParam]: budget,
+        ...(caps.sampling ? { temperature: 0 } : {}),
+      }),
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as {
+      choices?: { message?: { content?: string } }[];
+    };
+    return body.choices?.[0]?.message?.content ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function* streamLLM(
   cfg: ProviderConfig,
   messages: ChatTurn[],
@@ -159,6 +235,8 @@ async function* streamAnthropic(
       if (usage?.input_tokens !== undefined) return { t: "usage", in: usage.input_tokens };
     }
     if (ev.type === "message_delta") {
+      const delta = ev.delta as { stop_reason?: string } | undefined;
+      if (delta?.stop_reason) return { t: "stop", reason: delta.stop_reason };
       const usage = ev.usage as { output_tokens?: number } | undefined;
       if (usage?.output_tokens !== undefined) return { t: "usage", out: usage.output_tokens };
     }
@@ -184,11 +262,19 @@ async function* streamOpenAICompat(
   }
 
   const caps = capabilitiesFor(cfg.providerId, cfg.modelId);
+  const requested = cfg.maxTokens ?? 1024;
+  // A reasoning model needs headroom for its own thinking before it can emit
+  // anything at all, so never send it less than the floor.
+  const tokenBudget = caps.sampling ? requested : Math.max(requested, REASONING_TOKEN_FLOOR);
+
   const body: Record<string, unknown> = {
     model: cfg.modelId,
     messages: allMessages,
     stream: true,
-    [caps.tokenParam]: cfg.maxTokens ?? 1024,
+    [caps.tokenParam]: tokenBudget,
+    // OpenAI-compatible providers omit usage from a stream unless asked, which
+    // is why token counts were empty for every provider except Anthropic.
+    stream_options: { include_usage: true },
     ...(caps.sampling
       ? { temperature: cfg.temperature ?? 0.7, top_p: cfg.topP ?? 1 }
       : {}),
@@ -225,9 +311,15 @@ async function* streamOpenAICompat(
   if (!res.ok) throw await providerError(res, cfg.providerId);
 
   yield* parseSse(res, signal, (chunk) => {
-    const choices = chunk.choices as { delta?: { content?: string } }[] | undefined;
+    const choices = chunk.choices as
+      | { delta?: { content?: string }; finish_reason?: string | null }[]
+      | undefined;
     const text = choices?.[0]?.delta?.content;
     if (typeof text === "string" && text) return { t: "delta", v: text };
+
+    const finish = choices?.[0]?.finish_reason;
+    if (finish) return { t: "stop", reason: finish };
+
     const usage = chunk.usage as
       | { prompt_tokens?: number; completion_tokens?: number }
       | undefined;

@@ -612,8 +612,14 @@ function PromptPanel({
             <Input
               type="number" value={bot.maxTokens}
               onChange={(e) => update("maxTokens", parseInt(e.target.value || "0", 10))}
-              min={64} max={8192}
+              min={64} max={32000}
             />
+            {!samplingSupported && (
+              <p className="mt-1 text-[11px] text-muted">
+                Includes the model's own reasoning, so it needs far more than a
+                plain chat model — 4,000 or above.
+              </p>
+            )}
           </div>
           <div className={samplingSupported ? "" : "opacity-50"}>
             <Label>Top P ({bot.topP.toFixed(2)})</Label>
